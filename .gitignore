@@ -1,24 +1,38 @@
-# Compiled class file
-*.class
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
 
-# Log file
-*.log
+# Environnements virtuels
+.venv/
+venv/
+env/
+.python-version
 
-# BlueJ files
-*.ctxt
+# Tests & qualité
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
 
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
+# Variables d'environnement
+.env
+.env.local
 
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
+# Outils de packaging
+dist/
+build/
+*.egg-info/
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
