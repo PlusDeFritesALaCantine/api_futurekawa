@@ -1,10 +1,14 @@
 from datetime import date, datetime, timezone
 
-TEMP_MIN = 26.0
-TEMP_MAX = 32.0
-HUM_MIN = 53.0
-HUM_MAX = 57.0
 PEREMPTION_JOURS = 365
+
+# Conditions idéales par pays (cahier des charges) : (idéal, tolérance).
+SEUILS_PAYS: dict[str, dict[str, tuple[float, float]]] = {
+    "bresil":   {"temperature": (29.0, 3.0), "humidity": (55.0, 2.0)},
+    "equateur": {"temperature": (31.0, 3.0), "humidity": (60.0, 2.0)},
+    "colombie": {"temperature": (26.0, 3.0), "humidity": (80.0, 2.0)},
+}
+PAYS_PAR_DEFAUT = "bresil"
 
 
 def calculer_statut_lot(date_stockage: date) -> str:
@@ -15,12 +19,20 @@ def calculer_statut_lot(date_stockage: date) -> str:
     return "conforme"
 
 
-def est_mesure_hors_seuil(temperature: float, humidity: float) -> tuple[bool, str]:
+def est_mesure_hors_seuil(
+    temperature: float, humidity: float, pays: str = PAYS_PAR_DEFAUT
+) -> tuple[bool, str]:
+    seuils = SEUILS_PAYS.get(pays, SEUILS_PAYS[PAYS_PAR_DEFAUT])
+    temp_ideal, temp_tolerance = seuils["temperature"]
+    hum_ideal, hum_tolerance = seuils["humidity"]
+    temp_min, temp_max = temp_ideal - temp_tolerance, temp_ideal + temp_tolerance
+    hum_min, hum_max = hum_ideal - hum_tolerance, hum_ideal + hum_tolerance
+
     raisons = []
-    if temperature < TEMP_MIN or temperature > TEMP_MAX:
-        raisons.append(f"température {temperature}°C hors seuil [{TEMP_MIN}-{TEMP_MAX}°C]")
-    if humidity < HUM_MIN or humidity > HUM_MAX:
-        raisons.append(f"humidité {humidity}% hors seuil [{HUM_MIN}-{HUM_MAX}%]")
+    if temperature < temp_min or temperature > temp_max:
+        raisons.append(f"température {temperature}°C hors seuil [{temp_min}-{temp_max}°C]")
+    if humidity < hum_min or humidity > hum_max:
+        raisons.append(f"humidité {humidity}% hors seuil [{hum_min}-{hum_max}%]")
     if raisons:
         return True, " / ".join(raisons)
     return False, ""

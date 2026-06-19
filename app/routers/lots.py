@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Lot
@@ -21,8 +22,11 @@ def creer_lot(lot: LotCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[LotOut])
-def lister_lots(db: Session = Depends(get_db)):
-    lots = db.query(Lot).order_by(Lot.date_stockage.asc()).all()
+def lister_lots(pays: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    q = db.query(Lot)
+    if pays:
+        q = q.filter(Lot.pays == pays)
+    lots = q.order_by(Lot.date_stockage.asc()).all()
     return [_enrichir(l) for l in lots]
 
 
