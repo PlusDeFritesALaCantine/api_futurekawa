@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
-from app.models import Mesure
+from app.models import Lot, Mesure
 from app.schemas import MesureOut
 
 router = APIRouter(prefix="/mesures", tags=["mesures"])
@@ -21,7 +21,7 @@ def lister_mesures(
 
 
 @router.get("/latest", response_model=list[MesureOut])
-def derniere_mesure_par_entrepot(db: Session = Depends(get_db)):
+def derniere_mesure_par_entrepot(pays: Optional[str] = Query(None), db: Session = Depends(get_db)):
     from sqlalchemy import func
 
     sous_requete = (
@@ -29,13 +29,12 @@ def derniere_mesure_par_entrepot(db: Session = Depends(get_db)):
         .group_by(Mesure.entrepot_id)
         .subquery()
     )
-    mesures = (
-        db.query(Mesure)
-        .join(
-            sous_requete,
-            (Mesure.entrepot_id == sous_requete.c.entrepot_id)
-            & (Mesure.timestamp == sous_requete.c.max_ts),
-        )
-        .all()
+    q = db.query(Mesure).join(
+        sous_requete,
+        (Mesure.entrepot_id == sous_requete.c.entrepot_id)
+        & (Mesure.timestamp == sous_requete.c.max_ts),
     )
-    return mesures
+    if pays:
+        entrepots_du_pays = {l.entrepot_id for l in db.query(Lot).filter(Lot.pays == pays).all()}
+        q = q.filter(Mesure.entrepot_id.in_(entrepots_du_pays))
+    return q.all()
