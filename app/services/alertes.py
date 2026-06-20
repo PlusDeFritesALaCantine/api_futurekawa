@@ -44,3 +44,38 @@ def raison_lot_problematique(date_stockage: date) -> tuple[bool, str]:
         anciennete = (date.today() - date_stockage).days
         return True, f"lot périmé ({anciennete} jours de stockage)"
     return False, ""
+
+
+def recuperer_alertes(db, pays: str | None = None):
+    """Calcule les alertes (lots périmés, mesures hors seuil), filtrées par pays si fourni.
+
+    Logique partagée entre le routeur /alertes (consultation) et le notifier email
+    (déclenchement automatique) : retourne des tuples (objet, raison) bruts plutôt
+    que des schémas Pydantic, pour rester réutilisable des deux côtés.
+    """
+    from app.models import Lot, Mesure
+
+    tous_les_lots = db.query(Lot).all()
+    pays_par_entrepot = {lot.entrepot_id: lot.pays for lot in tous_les_lots}
+
+    lots = [l for l in tous_les_lots if not pays or l.pays == pays]
+    entrepots_du_pays = {l.entrepot_id for l in lots} if pays else None
+
+    lots_problematiques = []
+    for lot in lots:
+        est_pb, raison = raison_lot_problematique(lot.date_stockage)
+        if est_pb:
+            lot.statut = "perime"
+            lots_problematiques.append((lot, raison))
+
+    mesures = db.query(Mesure).all()
+    mesures_hors_seuil = []
+    for mesure in mesures:
+        if entrepots_du_pays is not None and mesure.entrepot_id not in entrepots_du_pays:
+            continue
+        pays_mesure = pays_par_entrepot.get(mesure.entrepot_id, PAYS_PAR_DEFAUT)
+        hors_seuil, raison = est_mesure_hors_seuil(mesure.temperature, mesure.humidity, pays_mesure)
+        if hors_seuil:
+            mesures_hors_seuil.append((mesure, raison))
+
+    return lots_problematiques, mesures_hors_seuil
