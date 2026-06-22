@@ -1,4 +1,8 @@
-"""Construction et envoi des emails d'alerte (cahier des charges III.4).
+"""Construction et envoi de l'email récapitulatif d'alertes (cahier des charges III.4).
+
+Un seul email par pays et par cycle de vérification (pas un email par alerte
+individuelle) : il liste chaque lot périmé, puis l'état des seuils température
+/humidité par entrepôt (trop élevé / trop bas) à partir du dernier relevé.
 
 En local/démo, le serveur SMTP cible est Mailpit (voir MQTT_Broker/docker-compose.yml) :
 les emails ne partent jamais vers de vraies adresses, ils sont visibles dans l'UI web
@@ -24,35 +28,46 @@ MANAGER_EMAILS: dict[str, str] = {
 }
 
 
-def construire_email_lot(pays: str, lot: Lot, raison: str) -> tuple[str, str]:
-    sujet = f"[FutureKawa] Alerte lot {lot.id} ({pays}) — lot périmé"
-    corps = (
-        "Bonjour,\n\n"
-        f"Le lot {lot.id} nécessite votre attention :\n"
-        f"  - Raison : {raison}\n"
-        f"  - Exploitation : {lot.exploitation}\n"
-        f"  - Entrepôt : {lot.entrepot_id}\n"
-        f"  - Date de stockage : {lot.date_stockage}\n"
-        f"  - Statut actuel : {lot.statut}\n\n"
-        "Merci de vérifier ce lot et de statuer sur son expédition ou son déclassement.\n\n"
-        "-- Plateforme de suivi FutureKawa (alerte automatique)"
-    )
-    return sujet, corps
+def construire_email_recap(
+    pays: str,
+    lots_problematiques: list[tuple[Lot, str]],
+    anomalies_seuils: list[tuple[Mesure, dict]],
+) -> tuple[str, str]:
+    nb_lots = len(lots_problematiques)
+    nb_seuils = len(anomalies_seuils)
 
+    sujet = f"[FutureKawa] Récapitulatif alertes {pays} — {nb_lots} lot(s) périmé(s), {nb_seuils} seuil(s) dépassé(s)"
 
-def construire_email_mesure(pays: str, mesure: Mesure, raison: str) -> tuple[str, str]:
-    sujet = f"[FutureKawa] Alerte conditions de stockage — {mesure.entrepot_id} ({pays})"
-    corps = (
-        "Bonjour,\n\n"
-        f"Une mesure hors seuil a été relevée dans l'entrepôt {mesure.entrepot_id} :\n"
-        f"  - Raison : {raison}\n"
-        f"  - Température : {mesure.temperature}°C\n"
-        f"  - Humidité : {mesure.humidity}%\n"
-        f"  - Relevé le : {mesure.timestamp}\n\n"
-        "Merci de vérifier les conditions de cet entrepôt dès que possible.\n\n"
-        "-- Plateforme de suivi FutureKawa (alerte automatique)"
-    )
-    return sujet, corps
+    lignes = [
+        "Bonjour,",
+        "",
+        f"Récapitulatif des alertes actives pour {pays} :",
+        "",
+        f"Lots périmés ({nb_lots}) :",
+    ]
+    if not lots_problematiques:
+        lignes.append("  - Aucun.")
+    else:
+        for lot, raison in lots_problematiques:
+            lignes.append(f"  - {lot.id} ({lot.exploitation}, entrepôt {lot.entrepot_id}) : {raison}")
+
+    lignes += ["", f"Seuils de conservation dépassés ({nb_seuils}) :"]
+    if not anomalies_seuils:
+        lignes.append("  - Aucun.")
+    else:
+        for mesure, anomalie in anomalies_seuils:
+            lignes.append(
+                f"  - Entrepôt {mesure.entrepot_id} : {anomalie['raison']} "
+                f"(relevé le {mesure.timestamp})"
+            )
+
+    lignes += [
+        "",
+        "Merci de vérifier ces éléments dès que possible.",
+        "",
+        "-- Plateforme de suivi FutureKawa (récapitulatif périodique)",
+    ]
+    return sujet, "\n".join(lignes)
 
 
 def envoyer_email(destinataire: str, sujet: str, corps: str) -> None:

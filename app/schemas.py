@@ -40,6 +40,7 @@ class AlerteLot(BaseModel):
 class AlerteMesure(BaseModel):
     mesure: MesureOut
     raison: str
+    severite: str
 
 
 class AlertesResponse(BaseModel):
