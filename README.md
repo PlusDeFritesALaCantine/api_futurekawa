@@ -2,6 +2,24 @@
 
 API REST FastAPI pour le pays Brésil — expose les lots de café, les mesures IoT et les alertes.
 
+## Fonctionnalités
+
+- **Lots** (`app/routers/lots.py`) : création, liste (filtrable par pays, triée FIFO par
+  date de stockage) et détail d'un lot ; statut (`conforme`/`perime`) recalculé à la volée
+  (`app/services/alertes.py::calculer_statut_lot`, péremption à 365 jours).
+- **Mesures** (`app/routers/mesures.py`) : historique (filtrable par `entrepot_id`) et
+  dernier relevé par entrepôt (filtrable par pays). Les lignes de `mesures` sont insérées
+  par les scripts de `MQTT_Broker/` (`subscriber.py` pour le pipeline MQTT temps réel,
+  `session_lot.py` pour les sessions de capture live), pas par cette API — elle est
+  consommatrice (lecture) de ces données.
+- **Alertes & emails** (`app/routers/alertes.py`, `app/services/`) : détecte les lots
+  périmés et les mesures hors seuil pays, et envoie un récapitulatif email au responsable
+  d'exploitation concerné (voir [Dispositif d'alertes email](#dispositif-dalertes-email-cahier-des-charges-iii4)).
+- **Deux modes de base de données** : PostgreSQL (pipeline temps réel partagé avec
+  `MQTT_Broker`, `DB_URL`/`DATABASE_URL` sur le port `5433`) ou SQLite locale
+  (`futurekawa.db`, utilisée par `start_all.sh` pour la démo front-end et alimentée par
+  `seed_sqlite.py` ainsi que par les sessions live `session_lot.py`).
+
 ## Prérequis
 
 - Docker & Docker Compose (démarrage via `MQTT_Broker/`)
@@ -30,10 +48,10 @@ uvicorn app.main:app --reload --port 8001
 |---------|------------------------|--------------------------------------------------|
 | GET     | `/health`              | Healthcheck                                      |
 | POST    | `/lots`                | Créer un lot                                     |
-| GET     | `/lots`                | Lister tous les lots (triés FIFO date ASC)       |
+| GET     | `/lots`                | Lister les lots (`?pays=` optionnel), triés FIFO date ASC |
 | GET     | `/lots/{id}`           | Détail d'un lot                                  |
 | GET     | `/mesures`             | Historique des mesures (`?entrepot_id=` optionnel) |
-| GET     | `/mesures/latest`      | Dernière mesure par entrepôt                     |
+| GET     | `/mesures/latest`      | Dernière mesure par entrepôt (`?pays=` optionnel) |
 | GET     | `/alertes`             | Lots périmés + mesures hors seuil                |
 | POST    | `/alertes/notifier`    | Déclenche immédiatement une vérification + envoi des emails en attente |
 
@@ -103,5 +121,10 @@ pytest
 ## Seed (données de test)
 
 ```bash
+# Contre PostgreSQL (schéma en syntaxe Postgres : INTERVAL, NOW())
 psql $DATABASE_URL -f seed.sql
+
+# Contre la base SQLite locale utilisée par start_all.sh (sqlite:///./futurekawa.db) :
+# volume et profils réalistes différents par pays/lot (via les modèles SQLAlchemy)
+.venv/bin/python seed_sqlite.py
 ```
