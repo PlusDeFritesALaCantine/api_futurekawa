@@ -42,11 +42,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and Push with Kaniko
-        uses: aevea/action-kaniko@v0.10.0
-        with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ${{ env.REGISTRY }}
-          tag: latest,sha-${{ github.sha }}
-          cache: true
+        run: |
+          AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
+          mkdir -p ~/.docker
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          /kaniko/executor \
+            --context="${{ github.workspace }}" \
+            --dockerfile="${{ github.workspace }}/Dockerfile" \
+            --destination="$REPO_LOWER:latest" \
+            --destination="$REPO_LOWER:sha-$SHORT_SHA" \
+            --cache=true
