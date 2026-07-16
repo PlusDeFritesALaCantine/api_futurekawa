@@ -1,19 +1,29 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main", "test_moua"]
   pull_request:
+    branches: ["main", "test_moua"]
+  
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
-    runs-on: self-hosted
-
+    runs-on: shared-runners
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Créer le venv et installer les dépendances
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Setup virtual environment and install dependencies
         run: |
           python3 -m venv .venv
           . .venv/bin/activate
@@ -24,3 +34,37 @@ jobs:
         run: |
           . .venv/bin/activate
           python -m pytest -q
+
+  build-and-push:
+    runs-on: shared-runners
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+  
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
