@@ -41,14 +41,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build and Push with Kaniko
+      - name: Download and Run Kaniko
         run: |
+          curl -LO https://github.com/GoogleContainerTools/kaniko/releases/latest/download/kaniko-executor
+          chmod +x kaniko-executor
           AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
           mkdir -p ~/.docker
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          /kaniko/executor \
+          ./kaniko-executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
