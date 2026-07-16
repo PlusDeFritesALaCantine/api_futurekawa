@@ -37,20 +37,26 @@ jobs:
     permissions:
       contents: read
       packages: write
+    container:
+      image: gcr.io/kaniko-project/executor:v1.23.2-debug
+      options: --user 0
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download and Run Kaniko
+      - name: Build and Push with Kaniko
         run: |
-          curl -LO https://github.com/GoogleContainerTools/kaniko/releases/latest/download/kaniko-executor
-          chmod +x kaniko-executor
+          # 1. Création de l'authentification pour GHCR
           AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
-          mkdir -p ~/.docker
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
+          mkdir -p /kaniko/.docker
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /kaniko/.docker/config.json
+
+          # 2. Préparation des variables (casse minuscule)
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          ./kaniko-executor \
+
+          # 3. Exécution du binaire déjà présent dans l'image
+          /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
