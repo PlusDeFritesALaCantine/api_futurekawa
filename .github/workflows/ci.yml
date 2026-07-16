@@ -37,6 +37,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    
     container:
       image: gcr.io/kaniko-project/executor:v1.23.2-debug
       options: --user 0
