@@ -41,22 +41,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build and Push with Kaniko (Isolated)
+      - name: Build and Push with Kaniko
         run: |
+          sudo rm -f /usr/bin/docker /usr/local/bin/docker || true
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          mkdir -p /tmp/kaniko-auth
           AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /tmp/kaniko-auth/config.json
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -v "/tmp/kaniko-auth:/kaniko/.docker" \
-            gcr.io/kaniko-project/executor:latest \
-            --context="dir:///workspace" \
-            --dockerfile="/workspace/Dockerfile" \
+          sudo mkdir -p /tmp/kaniko-auth
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /tmp/kaniko-auth/config.json > /dev/null
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sudo env DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
+            --context="${{ github.workspace }}" \
+            --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
-            --cache=true
+            --cache=true \
+            --whitelist-var-run=false
 
   deploy:
     runs-on: shared-runners
