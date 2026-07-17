@@ -50,12 +50,14 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           buildah login -u "PlusDeFritesALaCantine" -p "${{ secrets.GHCR_PAT }}" ghcr.io
           buildah bud \
+            --storage-driver=vfs \
+            --isolation=chroot \
             -f "${{ github.workspace }}/Dockerfile" \
             -t "$REPO_LOWER:latest" \
             -t "$REPO_LOWER:sha-$SHORT_SHA" \
             "${{ github.workspace }}"
-          buildah push "$REPO_LOWER:latest"
-          buildah push "$REPO_LOWER:sha-$SHORT_SHA"
+          buildah push --storage-driver=vfs "$REPO_LOWER:latest"
+          buildah push --storage-driver=vfs "$REPO_LOWER:sha-$SHORT_SHA"
 
   deploy:
     runs-on: shared-runners
