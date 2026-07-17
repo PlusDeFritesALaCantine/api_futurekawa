@@ -44,7 +44,7 @@ jobs:
       - name: Build and Push with Kaniko
         run: |
           sudo rm -f /usr/bin/docker /usr/local/bin/docker || true
-          AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
+          AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
           sudo mkdir -p /kaniko/.docker
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /kaniko/.docker/config.json > /dev/null
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
