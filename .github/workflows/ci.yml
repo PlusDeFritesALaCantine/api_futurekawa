@@ -44,20 +44,14 @@ jobs:
       - name: Build and Push with Kaniko
         run: |
           sudo rm -f /usr/bin/docker /usr/local/bin/docker || true
-
           AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
           mkdir -p ~/.docker
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
-
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-
-          mkdir -p "${{ github.workspace }}/kaniko-home"
-
           /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
-            --kaniko-dir="${{ github.workspace }}/kaniko-home" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
             --force \
