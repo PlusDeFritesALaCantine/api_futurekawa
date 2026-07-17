@@ -44,12 +44,12 @@ jobs:
       - name: Build and Push with Kaniko
         run: |
           sudo rm -f /usr/bin/docker /usr/local/bin/docker || true
-          AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
-          sudo mkdir -p /kaniko/.docker
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /kaniko/.docker/config.json > /dev/null
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          sudo /kaniko/executor \
+          AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
+          sudo mkdir -p /tmp/kaniko-auth
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /tmp/kaniko-auth/config.json > /dev/null
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sudo env DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
