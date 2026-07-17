@@ -50,6 +50,7 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           cp -r "${{ github.workspace }}/." /tmp/build-context
+          export KANIKO_DIR="/tmp"
           /kaniko/executor \
             --context="/tmp/build-context" \
             --dockerfile="/tmp/build-context/Dockerfile" \
