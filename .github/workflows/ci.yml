@@ -44,14 +44,10 @@ jobs:
       - name: Build and Push with Kaniko
         run: |
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-
           AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
-          
           mkdir -p /tmp/kaniko-auth
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /tmp/kaniko-auth/config.json
-
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-
           env USER=root HOME=/root DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
@@ -60,7 +56,8 @@ jobs:
             --cache=false \
             --single-snapshot \
             --compressed-caching=false \
-            --no-format \
+            --force \
+            --snapshot-mode=redo \
             --ignore-path=/var/run \
             --ignore-path=/home/runner
 
