@@ -41,23 +41,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build and Push with Buildah
+      - name: Build and Push with Kaniko (Total Sandbox)
         run: |
-          if ! command -v buildah &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y buildah
-          fi
-          REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          buildah login -u "PlusDeFritesALaCantine" -p "${{ secrets.GHCR_PAT }}" ghcr.io
-          buildah bud \
-            --storage-driver=vfs \
-            --isolation=chroot \
-            -f "${{ github.workspace }}/Dockerfile" \
-            -t "$REPO_LOWER:latest" \
-            -t "$REPO_LOWER:sha-$SHORT_SHA" \
-            "${{ github.workspace }}"
-          buildah push --storage-driver=vfs "$REPO_LOWER:latest"
-          buildah push --storage-driver=vfs "$REPO_LOWER:sha-$SHORT_SHA"
+            REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
+            mkdir -p /tmp/kaniko-auth
+            echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /tmp/kaniko-auth/config.json
+            export HOME=/tmp
+            export USER=runner
+            /kaniko/executor \
+              --context="${{ github.workspace }}" \
+              --dockerfile="${{ github.workspace }}/Dockerfile" \
+              --destination="$REPO_LOWER:latest" \
+              --destination="$REPO_LOWER:sha-$SHORT_SHA" \
+              --cache=false \
+              --force \
+              --whitelist-var-run=false \
+              --ignore-path=/home/runner \
+              --ignore-path=/var/run
 
   deploy:
     runs-on: shared-runners
