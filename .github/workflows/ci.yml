@@ -49,11 +49,10 @@ jobs:
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          export HOME=/tmp
-          export USER=runner
+          cp -r "${{ github.workspace }}/." /tmp/build-context
           /kaniko/executor \
-            --context="${{ github.workspace }}" \
-            --dockerfile="${{ github.workspace }}/Dockerfile" \
+            --context="/tmp/build-context" \
+            --dockerfile="/tmp/build-context/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
             --force \
