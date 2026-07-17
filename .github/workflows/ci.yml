@@ -49,13 +49,14 @@ jobs:
           sudo mkdir -p /tmp/kaniko-auth
           echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /tmp/kaniko-auth/config.json > /dev/null
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sudo mkdir -p /tmp/kaniko-root
           sudo env DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
             --cache=true \
-            --whitelist-var-run=false
+            --rootdir=/tmp/kaniko-root
 
   deploy:
     runs-on: shared-runners
