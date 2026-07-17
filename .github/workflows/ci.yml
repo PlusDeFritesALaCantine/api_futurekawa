@@ -52,9 +52,7 @@ jobs:
 
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
 
-          mkdir -p /tmp/kaniko-root
-
-          DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
+          env USER=root HOME=/root DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
@@ -62,7 +60,7 @@ jobs:
             --cache=false \
             --single-snapshot \
             --compressed-caching=false \
-            --snapshot-mode=redo \
+            --no-format \
             --ignore-path=/var/run \
             --ignore-path=/home/runner
 
