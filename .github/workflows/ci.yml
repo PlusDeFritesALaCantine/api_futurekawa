@@ -55,8 +55,6 @@ jobs:
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
             --cache=true \
-            --single-snapshot \
-            --compressed-caching=false \
             --ignore-path=/var/run \
             --ignore-path=/home/runner
 
