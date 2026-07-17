@@ -45,20 +45,15 @@ jobs:
         run: |
           sudo rm -f /usr/bin/docker /usr/local/bin/docker || true
           AUTH=$(echo -n "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" | base64 | tr -d '\n')
-          mkdir -p ~/.docker
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
+          sudo mkdir -p /kaniko/.docker
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" | sudo tee /kaniko/.docker/config.json > /dev/null
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          mkdir -p /tmp/build-context
-          mkdir -p /tmp/kaniko-internal
-          cp -r "${{ github.workspace }}/." /tmp/build-context
-          export KANIKO_DIR="/tmp/kaniko-internal"
-          /kaniko/executor \
-            --context="/tmp/build-context" \
-            --dockerfile="/tmp/build-context/Dockerfile" \
+          sudo /kaniko/executor \
+            --context="${{ github.workspace }}" \
+            --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
-            --force \
             --cache=true
 
   deploy:
