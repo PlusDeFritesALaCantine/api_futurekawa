@@ -57,7 +57,7 @@ jobs:
             --single-snapshot \
             --compressed-caching=false \
             --force \
-            --snapshot-mode=redo \
+            --ignore-path=/ \
             --ignore-path=/var/run \
             --ignore-path=/home/runner
 
