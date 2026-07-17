@@ -34,9 +34,6 @@ jobs:
   build-and-push:
     runs-on: shared-runners
     needs: test
-    container:
-      image: gcr.io/kaniko-project/executor:v1.23.2-debug
-      options: --entrypoint ""
     permissions:
       contents: read
       packages: write
@@ -48,17 +45,19 @@ jobs:
         run: |
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
-          mkdir -p /kaniko/.docker
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /kaniko/.docker/config.json
+          mkdir -p /tmp/kaniko-auth
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > /tmp/kaniko-auth/config.json
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          /kaniko/executor \
+          DOCKER_CONFIG=/tmp/kaniko-auth /kaniko/executor \
             --context="${{ github.workspace }}" \
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
             --cache=true \
             --single-snapshot \
-            --compressed-caching=false
+            --compressed-caching=false \
+            --ignore-path=/var/run \
+            --ignore-path=/home/runner
 
   deploy:
     runs-on: shared-runners
