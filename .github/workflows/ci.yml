@@ -60,6 +60,7 @@ jobs:
             --kaniko-dir="${{ github.workspace }}/kaniko-home" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
+            --force \
             --cache=true
 
   deploy:
@@ -72,19 +73,10 @@ jobs:
 
       - name: Deploy to Server via SSH
         run: |
-          # 1. Préparation de la clé SSH privée dans le runner
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
-          # 2. Ajout du serveur aux hôtes connus pour éviter la confirmation interactive
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
-
-          # 3. Extraction dynamique du nom du dépôt en minuscules
           REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
-
-          # 4. Création du dossier de destination s'il n'existe pas, puis synchronisation du code
           ssh -i ~/.ssh/id_rsa moua@${{ secrets.SERVER_HOST }} "mkdir -p /home/moua/$REPO_NAME"
-          
-          # rsync permet de transférer uniquement les fichiers modifiés proprement (en excluant .git)
           rsync -avz -e "ssh -i ~/.ssh/id_rsa" --exclude='.git' --exclude='.github' ./ moua@${{ secrets.SERVER_HOST }}:/home/moua/$REPO_NAME/
