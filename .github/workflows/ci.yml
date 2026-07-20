@@ -77,9 +77,11 @@ jobs:
       - name: Deploy to Server via SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          echo "" >> ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
           REPO_NAME=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
-          ssh -i ~/.ssh/id_rsa moua@${{ secrets.SERVER_HOST }} "mkdir -p /home/moua/$REPO_NAME"
-          rsync -avz -e "ssh -i ~/.ssh/id_rsa" --exclude='.git' --exclude='.github' ./ moua@${{ secrets.SERVER_HOST }}:/home/moua/$REPO_NAME/
+          ssh -i ~/.ssh/id_ed25519 moua@${{ secrets.SERVER_HOST }} "mkdir -p /home/moua/$REPO_NAME"
+          rsync -avz -e "ssh -i ~/.ssh/id_ed25519" --exclude='.git' --exclude='.github' ./ moua@${{ secrets.SERVER_HOST }}:/home/moua/$REPO_NAME/
