@@ -41,23 +41,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build and Push with Kaniko
+      - name: Build and Push with Kaniko via K8s Job
         run: |
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          mkdir -p ~/.docker
+          JOB_NAME="kaniko-build-${SHORT_SHA}-${RANDOM}"
           AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
-          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
-          /kaniko/executor \
-            --context="${{ github.workspace }}" \
-            --dockerfile="${{ github.workspace }}/Dockerfile" \
-            --destination="$REPO_LOWER:latest" \
-            --destination="$REPO_LOWER:sha-$SHORT_SHA" \
-            --ignore-path=/sys \
-            --ignore-path=/proc \
-            --snapshot-mode=redo \
-            --compressed-caching=false \
-            --cache=true
+          kubectl create secret generic kaniko-secret \
+            --from-literal=.dockerconfigjson="{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" \
+            --type=kubernetes.io/dockerconfigjson \
+            -n arc-runners --dry-run=client -o yaml | kubectl apply -f -
+          kubectl run $JOB_NAME \
+            --namespace=arc-runners \
+            --restart=Never \
+            --image=gcr.io/kaniko-project/executor:v1.23.2-debug \
+            --overrides="{
+              \"spec\": {
+                \"restartPolicy\": \"Never\",
+                \"containers\": [{
+                  \"name\": \"kaniko\",
+                  \"image\": \"gcr.io/kaniko-project/executor:v1.23.2-debug\",
+                  \"args\": [
+                    \"--context=git://github.com/PlusDeFritesALaCantine/api_futurekawa.git#refs/heads/main\",
+                    \"--dockerfile=Dockerfile\",
+                    \"--destination=$REPO_LOWER:latest\",
+                    \"--destination=$REPO_LOWER:sha-$SHORT_SHA\",
+                    \"--cache=true\"
+                  ],
+                  \"volumeMounts\": [{
+                    \"name\": \"kaniko-secret\",
+                    \"mountPath\": \"/kaniko/.docker/\"
+                  }]
+                }],
+                \"volumes\": [{
+                  \"name\": \"kaniko-secret\",
+                  \"secret\": {
+                    \"secretName\": \"kaniko-secret\"
+                  }
+                }]
+              }
+            }"
+          echo "Attente du démarrage du Pod Kaniko..."
+          kubectl wait --for=condition=Ready pod/$JOB_NAME -n arc-runners --timeout=60s
+          kubectl logs -f pod/$JOB_NAME -n arc-runners
+          kubectl delete pod $JOB_NAME -n arc-runners
 
   deploy:
     runs-on: shared-runners
