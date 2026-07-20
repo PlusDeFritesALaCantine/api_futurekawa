@@ -38,6 +38,31 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Check Kubernetes Permissions (via API / curl)
+        run: |
+          TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || echo "")
+          
+          if [ -z "$TOKEN" ]; then
+            echo "❌ Aucun token Kubernetes trouvé. Le runner n'a pas d'accès direct au cluster."
+            exit 0
+          fi
+          curl -s -k \
+            -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            https://kubernetes.default.svc/apis/authorization.k8s.io/v1/selfsubjectaccessreviews \
+            -d '{
+              "apiVersion": "authorization.k8s.io/v1",
+              "kind": "SelfSubjectAccessReview",
+              "spec": {
+                "resourceAttributes": {
+                  "namespace": "default",
+                  "verb": "create",
+                  "resource": "pods"
+                }
+              }
+            }' | grep '"allowed": true' && echo "DROITS OK : Le runner peut créer des Pods" || echo "DROITS REFUSÉS : Le runner NE PEUT PAS créer de Pods"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
