@@ -41,6 +41,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Podman
+        run: |
+          if ! command -v podman &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y podman
+          fi
+
       - name: Log in to GHCR
         uses: redhat-actions/podman-login@v1
         with:
@@ -48,13 +54,14 @@ jobs:
           username: PlusDeFritesALaCantine
           password: ${{ secrets.GHCR_PAT }}
 
-      - name: Build and Push Image
-        uses: redhat-actions/buildah-build@v2
-        with:
-          image: ${{ env.IMAGE_NAME }}
-          tags: latest sha-${{ github.sha }}
-          containerfiles: ./Dockerfile
-          registry: ${{ env.REGISTRY }}
+      - name: Build and Push Image with Podman
+        run: |
+          REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          podman build -t "$REPO_LOWER:latest" -t "$REPO_LOWER:sha-$SHORT_SHA" -f ./Dockerfile .
+          podman push "$REPO_LOWER:latest"
+          podman push "$REPO_LOWER:sha-$SHORT_SHA"
 
   deploy:
     runs-on: shared-runners
