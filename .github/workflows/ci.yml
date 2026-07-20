@@ -41,27 +41,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Podman
-        run: |
-          if ! command -v podman &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y podman
-          fi
-
-      - name: Log in to GHCR
-        uses: redhat-actions/podman-login@v1
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: PlusDeFritesALaCantine
-          password: ${{ secrets.GHCR_PAT }}
-
-      - name: Build and Push Image with Podman
+      - name: Build and Push with Kaniko
         run: |
           REPO_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-
-          podman build -t "$REPO_LOWER:latest" -t "$REPO_LOWER:sha-$SHORT_SHA" -f ./Dockerfile .
-          podman push "$REPO_LOWER:latest"
-          podman push "$REPO_LOWER:sha-$SHORT_SHA"
+          mkdir -p ~/.docker
+          AUTH=$(echo -n "PlusDeFritesALaCantine:${{ secrets.GHCR_PAT }}" | base64 | tr -d '\n')
+          echo "{\"auths\":{\"${{ env.REGISTRY }}\":{\"auth\":\"$AUTH\"}}}" > ~/.docker/config.json
+          /kaniko/executor \
+            --context="${{ github.workspace }}" \
+            --dockerfile="${{ github.workspace }}/Dockerfile" \
+            --destination="$REPO_LOWER:latest" \
+            --destination="$REPO_LOWER:sha-$SHORT_SHA" \
+            --cache=true
 
   deploy:
     runs-on: shared-runners
