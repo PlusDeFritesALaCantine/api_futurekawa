@@ -53,8 +53,10 @@ jobs:
             --dockerfile="${{ github.workspace }}/Dockerfile" \
             --destination="$REPO_LOWER:latest" \
             --destination="$REPO_LOWER:sha-$SHORT_SHA" \
+            --ignore-path=/sys \
+            --ignore-path=/proc \
             --snapshot-mode=redo \
-            --single-snapshot \
+            --compressed-caching=false \
             --cache=true
 
   deploy:
