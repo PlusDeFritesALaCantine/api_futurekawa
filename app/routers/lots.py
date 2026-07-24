@@ -38,6 +38,15 @@ def detail_lot(lot_id: str, db: Session = Depends(get_db)):
     return _enrichir(lot)
 
 
+@router.delete("/{lot_id}", status_code=204)
+def supprimer_lot(lot_id: str, db: Session = Depends(get_db)):
+    lot = db.get(Lot, lot_id)
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot introuvable")
+    db.delete(lot)
+    db.commit()
+
+
 def _enrichir(lot: Lot) -> LotOut:
     statut = calculer_statut_lot(lot.date_stockage)
     lot.statut = statut

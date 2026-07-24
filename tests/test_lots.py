@@ -86,3 +86,13 @@ class TestEndpointsLots:
         }
         r = client.post("/lots", json=payload)
         assert r.status_code == 409
+
+    def test_supprimer_lot(self, client, db):
+        _lot(db, "LOT-DEL", 10)
+        r = client.delete("/lots/LOT-DEL")
+        assert r.status_code == 204
+        assert db.get(Lot, "LOT-DEL") is None
+
+    def test_supprimer_lot_introuvable(self, client):
+        r = client.delete("/lots/INEXISTANT")
+        assert r.status_code == 404
