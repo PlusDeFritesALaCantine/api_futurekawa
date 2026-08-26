@@ -2,8 +2,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Lot
-from app.schemas import LotCreate, LotOut
+from app.models import Lot, Mesure
+from app.schemas import LotCreate, LotOut, MesureOut
 from app.services.alertes import calculer_statut_lot
 
 router = APIRouter(prefix="/lots", tags=["lots"])
@@ -36,6 +36,16 @@ def detail_lot(lot_id: str, db: Session = Depends(get_db)):
     if not lot:
         raise HTTPException(status_code=404, detail="Lot introuvable")
     return _enrichir(lot)
+
+
+@router.get("/{lot_id}/mesures", response_model=list[MesureOut])
+def lister_mesures_par_lot(lot_id: str, db: Session = Depends(get_db)):
+    """Récupère l'historique complet des mesures enregistrées pour un lot spécifique."""
+    lot = db.get(Lot, lot_id)
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot introuvable")
+    
+    return lot.mesures
 
 
 @router.delete("/{lot_id}", status_code=204)

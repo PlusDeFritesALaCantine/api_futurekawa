@@ -14,7 +14,6 @@ Base.metadata.create_all(bind=engine)
 
 logger = logging.getLogger(__name__)
 
-# Fréquence de vérification des alertes (cahier des charges III.4), configurable.
 ALERT_CHECK_INTERVAL_SECONDS = int(os.getenv("ALERT_CHECK_INTERVAL_SECONDS", "60"))
 
 

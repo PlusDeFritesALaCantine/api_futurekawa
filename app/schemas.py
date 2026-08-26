@@ -22,12 +22,23 @@ class LotOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MesureCreate(BaseModel):
+    id: str
+    entrepot_id: str
+    temperature: float
+    humidity: float
+    lot_id: Optional[str] = None
+
+
 class MesureOut(BaseModel):
     id: str
     entrepot_id: str
     temperature: float
     humidity: float
     timestamp: datetime
+    lot_id: Optional[str] = None
+    
+    lot: Optional[LotOut] = None
 
     model_config = {"from_attributes": True}
 
