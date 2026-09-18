@@ -7,10 +7,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import lots, mesures, alertes
 from app.database import engine
+from app.migrations import synchroniser_schema
 from app.models import Base
 from app.services.notifier import verifier_et_notifier
 
 Base.metadata.create_all(bind=engine)
+synchroniser_schema(engine)
 
 logger = logging.getLogger(__name__)
 

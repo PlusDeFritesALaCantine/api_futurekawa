@@ -26,10 +26,12 @@ from datetime import date, datetime, timedelta, timezone
 os.environ.setdefault("DATABASE_URL", "sqlite:///./futurekawa.db")
 
 from app.database import Base, SessionLocal, engine
+from app.migrations import synchroniser_schema
 from app.models import Lot, Mesure
 from app.services.alertes import SEUILS_PAYS, calculer_statut_lot
 
 Base.metadata.create_all(bind=engine)
+synchroniser_schema(engine)
 
 
 def generer_mesures(seed: int, jours_historique: float, intervalle_heures: float,
