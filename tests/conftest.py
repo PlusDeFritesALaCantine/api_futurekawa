@@ -6,6 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+# L'ordonnanceur d'alertes tournerait en parallèle des tests et enverrait des
+# e-mails dans leur dos. Les tests appellent verifier_et_notifier() et
+# POST /alertes/notifier directement, ce qui est plus explicite.
+os.environ.setdefault("ALERT_LOOP_ENABLED", "0")
 
 from app.database import Base, get_db
 from app.main import app
@@ -18,8 +22,14 @@ TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @pytest.fixture(autouse=True)
 def setup_db():
+    from app.services import parametres
+
     Base.metadata.create_all(bind=engine)
+    # Le cache de paramètres vit au niveau module : sans ce reset, un test qui
+    # modifie les seuils contaminerait les suivants.
+    parametres.invalider()
     yield
+    parametres.invalider()
     Base.metadata.drop_all(bind=engine)
 
 

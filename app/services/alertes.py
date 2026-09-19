@@ -1,19 +1,20 @@
+"""Règles métier d'évaluation : qualité d'une mesure et péremption d'un lot.
+
+Les seuils et la durée de péremption ne sont plus des constantes : ils viennent
+de la table `pays` via services/parametres.py, et sont modifiables depuis le
+site. Les fonctions gardent leur signature — `pays` reste un simple slug — donc
+elles restent testables sans base : hors contexte base, parametres.get() retombe
+sur les valeurs du cahier des charges.
+"""
+
 from datetime import date
 
-PEREMPTION_JOURS = 365
-
-# Conditions idéales par pays (cahier des charges) : (idéal, tolérance).
-SEUILS_PAYS: dict[str, dict[str, tuple[float, float]]] = {
-    "bresil":   {"temperature": (29.0, 3.0), "humidity": (55.0, 2.0)},
-    "equateur": {"temperature": (31.0, 3.0), "humidity": (60.0, 2.0)},
-    "colombie": {"temperature": (26.0, 3.0), "humidity": (80.0, 2.0)},
-}
-PAYS_PAR_DEFAUT = "bresil"
+from app.services.parametres import PAYS_PAR_DEFAUT, get as _params
 
 # Échelle de qualité d'une mesure, du meilleur au pire. La frontière entre
-# "correct" et "bas" est la tolérance du cahier des charges (±3°C / ±2%) :
-# au-delà, la mesure est hors seuil. Seuls les tiers "bas" et "critique"
-# déclenchent une alerte (page Alertes + email) — cf. evaluer_mesure().
+# "correct" et "bas" est la tolérance paramétrée : au-delà, la mesure est hors
+# seuil. Seuls les tiers "bas" et "critique" déclenchent une alerte
+# (page Alertes + email) — cf. evaluer_mesure().
 ORDRE_TIERS = ["excellent", "bon", "correct", "bas", "critique"]
 TIERS_ALERTE = {"bas", "critique"}
 
@@ -22,11 +23,15 @@ MULTIPLICATEUR_CRITIQUE = 2.0
 
 _ADJECTIF_FEMININ = {"excellent": "excellente", "bon": "bonne", "correct": "correcte"}
 
+# Grandeur -> (libellé, unité, nom du seuil dans ParametresPays)
+_GRANDEURS = (
+    ("température", "°C", "temperature"),
+    ("humidité", "%", "humidity"),
+)
 
-def calculer_statut_lot(date_stockage: date) -> str:
-    today = date.today()
-    anciennete = (today - date_stockage).days
-    if anciennete > PEREMPTION_JOURS:
+
+def calculer_statut_lot(date_stockage: date, pays: str = PAYS_PAR_DEFAUT) -> str:
+    if (date.today() - date_stockage).days > _params(pays).peremption_jours:
         return "perime"
     return "conforme"
 
@@ -51,31 +56,37 @@ def evaluer_qualite(temperature: float, humidity: float, pays: str = PAYS_PAR_DE
     {"grandeur", "valeur", "tier", "direction", "raison"} ; "direction" est None pour
     excellent/bon/correct (la mesure est dans la tolérance, pas de sens à signaler un sens).
     """
-    seuils = SEUILS_PAYS.get(pays, SEUILS_PAYS[PAYS_PAR_DEFAUT])
+    params = _params(pays)
+    valeurs = {"temperature": temperature, "humidity": humidity}
     resultats = []
-    for grandeur, valeur, unite, (ideal, tolerance) in (
-        ("température", temperature, "°C", seuils["temperature"]),
-        ("humidité", humidity, "%", seuils["humidity"]),
-    ):
+    for libelle, unite, cle in _GRANDEURS:
+        valeur = valeurs[cle]
+        ideal, tolerance = params.seuil(cle)
         deviation = valeur - ideal
         tier = _classer(abs(deviation), tolerance)
         if tier in TIERS_ALERTE:
             direction = "trop élevée" if deviation > 0 else "trop basse"
             borne_min, borne_max = ideal - tolerance, ideal + tolerance
             raison = (
-                f"{grandeur} {direction} : {valeur:.1f}{unite} "
+                f"{libelle} {direction} : {valeur:.1f}{unite} "
                 f"(seuil {borne_min:.1f}–{borne_max:.1f}{unite})"
             )
         else:
             direction = None
             adjectif = _ADJECTIF_FEMININ[tier]
-            raison = f"{grandeur} {adjectif} : {valeur:.1f}{unite} (idéal {ideal:.1f}{unite} ±{tolerance:.1f}{unite})"
+            raison = (
+                f"{libelle} {adjectif} : {valeur:.1f}{unite} "
+                f"(idéal {ideal:.1f}{unite} ±{tolerance:.1f}{unite})"
+            )
         resultats.append({
-            "grandeur": grandeur,
+            "grandeur": libelle,
             "valeur": valeur,
             "tier": tier,
             "direction": direction,
             "raison": raison,
+            # Type technique, utilisé comme composant de la clé de déduplication
+            # des alertes persistées (cf. services/gestion_alertes.py).
+            "type": "temperature" if cle == "temperature" else "humidite",
         })
     return resultats
 
@@ -94,17 +105,49 @@ def est_mesure_hors_seuil(
     return True, " / ".join(a["raison"] for a in anomalies)
 
 
-def raison_lot_problematique(date_stockage: date) -> tuple[bool, str]:
-    statut = calculer_statut_lot(date_stockage)
-    if statut == "perime":
-        anciennete = (date.today() - date_stockage).days
-        depassement = anciennete - PEREMPTION_JOURS
-        raison = (
-            f"Lot périmé : stocké depuis {anciennete} jours "
-            f"(limite {PEREMPTION_JOURS} jours, dépassement de {depassement} jours)"
+def raison_lot_problematique(
+    date_stockage: date, pays: str = PAYS_PAR_DEFAUT
+) -> tuple[bool, str]:
+    if calculer_statut_lot(date_stockage, pays) != "perime":
+        return False, ""
+    limite = _params(pays).peremption_jours
+    anciennete = (date.today() - date_stockage).days
+    raison = (
+        f"Lot périmé : stocké depuis {anciennete} jours "
+        f"(limite {limite} jours, dépassement de {anciennete - limite} jours)"
+    )
+    return True, raison
+
+
+def dernieres_mesures_par_entrepot(db, entrepots: set[str] | None = None):
+    """Le dernier relevé de chaque entrepôt, éventuellement restreint à un sous-ensemble.
+
+    Extrait ici parce que trois appelants en ont besoin avec exactement la même
+    définition de « dernier relevé » : le routeur /alertes, le notifier e-mail et
+    la synchronisation des alertes persistées.
+    """
+    from sqlalchemy import func
+
+    from app.models import Mesure
+
+    sous_requete = db.query(
+        Mesure.entrepot_id, func.max(Mesure.timestamp).label("max_ts")
+    )
+    if entrepots is not None:
+        if not entrepots:
+            return []
+        sous_requete = sous_requete.filter(Mesure.entrepot_id.in_(entrepots))
+    sous_requete = sous_requete.group_by(Mesure.entrepot_id).subquery()
+
+    return (
+        db.query(Mesure)
+        .join(
+            sous_requete,
+            (Mesure.entrepot_id == sous_requete.c.entrepot_id)
+            & (Mesure.timestamp == sous_requete.c.max_ts),
         )
-        return True, raison
-    return False, ""
+        .all()
+    )
 
 
 def recuperer_alertes(db, pays: str | None = None):
@@ -116,15 +159,13 @@ def recuperer_alertes(db, pays: str | None = None):
     une alerte par entrepôt) : une alerte reflète l'état actuel, pas chaque dépassement
     passé de l'historique — sinon un entrepôt avec des semaines de relevés hors seuil
     génèrerait des dizaines d'alertes pour le même problème. L'historique complet reste
-    consultable via les courbes du lot (GET /mesures).
+    consultable via GET /mesures.
 
-    Logique partagée entre le routeur /alertes (consultation) et le notifier email
-    (déclenchement automatique) : retourne des tuples bruts plutôt que des schémas
-    Pydantic, pour rester réutilisable des deux côtés.
+    Logique partagée entre le routeur /alertes (consultation), le notifier email
+    (déclenchement automatique) et la persistance des alertes : retourne des tuples
+    bruts plutôt que des schémas Pydantic, pour rester réutilisable des trois côtés.
     """
-    from sqlalchemy import func
-
-    from app.models import Lot, Mesure
+    from app.models import Lot
 
     tous_les_lots = db.query(Lot).all()
     pays_par_entrepot = {lot.entrepot_id: lot.pays for lot in tous_les_lots}
@@ -134,26 +175,13 @@ def recuperer_alertes(db, pays: str | None = None):
 
     lots_problematiques = []
     for lot in lots:
-        est_pb, raison = raison_lot_problematique(lot.date_stockage)
+        est_pb, raison = raison_lot_problematique(lot.date_stockage, lot.pays)
         if est_pb:
             lot.statut = "perime"
             lots_problematiques.append((lot, raison))
 
-    sous_requete = (
-        db.query(Mesure.entrepot_id, func.max(Mesure.timestamp).label("max_ts"))
-        .group_by(Mesure.entrepot_id)
-        .subquery()
-    )
-    q = db.query(Mesure).join(
-        sous_requete,
-        (Mesure.entrepot_id == sous_requete.c.entrepot_id)
-        & (Mesure.timestamp == sous_requete.c.max_ts),
-    )
-    if entrepots_du_pays is not None:
-        q = q.filter(Mesure.entrepot_id.in_(entrepots_du_pays))
-
     mesures_hors_seuil = []
-    for mesure in q.all():
+    for mesure in dernieres_mesures_par_entrepot(db, entrepots_du_pays):
         pays_mesure = pays_par_entrepot.get(mesure.entrepot_id, PAYS_PAR_DEFAUT)
         anomalies = evaluer_mesure(mesure.temperature, mesure.humidity, pays_mesure)
         if not anomalies:

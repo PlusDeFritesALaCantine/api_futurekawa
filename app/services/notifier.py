@@ -1,8 +1,9 @@
 """Déclenchement de l'email récapitulatif d'alertes (cahier des charges III.4).
 
 Règles : un récapitulatif est envoyé au responsable d'exploitation du pays
-concerné s'il y a au moins une alerte active :
-  - un lot dépasse 365 jours de stockage (péremption) ;
+concerné s'il existe au moins une alerte ouverte dont l'e-mail n'est pas encore
+parti :
+  - un lot dépasse la durée de péremption paramétrée pour son pays ;
   - le dernier relevé température/humidité d'un entrepôt est classé "bas" ou
     "critique" sur l'échelle de qualité (excellent/bon/correct/bas/critique,
     cf. app/services/alertes.py) — les tiers excellent/bon/correct ne
@@ -16,29 +17,34 @@ Fréquence de vérification : appelée au démarrage de l'API puis toutes les
 ALERT_CHECK_INTERVAL_SECONDS secondes (60s par défaut, voir app/main.py),
 ainsi que manuellement via POST /alertes/notifier.
 
-Dédoublonnage : un seul récap par pays est envoyé tant que la situation ne
-change pas (même lots périmés, mêmes entrepôts en dépassement). Si une
-nouvelle alerte apparaît ou qu'une alerte se résout, un nouveau récap reflète
-l'état à jour. Cet état est gardé en mémoire du process (limite connue de ce
-prototype : remis à zéro si l'API redémarre).
+Dédoublonnage : porté par la colonne `alertes.email_envoye_le`, pas par un
+dictionnaire en mémoire. Tant qu'aucune alerte nouvelle n'apparaît, aucun
+nouveau récap ne part ; et, contrairement à la version précédente, l'état
+survit au redémarrage de l'API — un redémarrage ne provoque plus un second
+envoi pour des alertes déjà notifiées.
+
+Le destinataire et l'activation des e-mails viennent de la table `pays`
+(modifiables depuis le site) ; MANAGER_EMAILS ne sert plus que de repli
+lorsqu'aucun paramétrage n'existe encore.
 """
 
 import logging
 
-from sqlalchemy import func
-
 from app.database import SessionLocal
-from app.models import Lot, Mesure
-from app.services.alertes import evaluer_mesure, recuperer_alertes
-from app.services.email import MANAGER_EMAILS, SMTP_HOST, SMTP_PORT, construire_email_recap, envoyer_email
+from app.models import Lot
+from app.services import gestion_alertes, parametres
+from app.services.alertes import (
+    dernieres_mesures_par_entrepot, evaluer_mesure, recuperer_alertes,
+)
+from app.services.email import (
+    MANAGER_EMAILS, SMTP_HOST, SMTP_PORT, construire_email_recap, envoyer_email,
+)
 
 logger = logging.getLogger(__name__)
 
-_dernier_recap_envoye: dict[str, frozenset[str]] = {}
-
 
 def verifier_et_notifier(pays_liste: list[str] | None = None) -> int:
-    """Vérifie l'état des alertes par pays et envoie un récap si la situation a changé.
+    """Vérifie l'état des alertes par pays et envoie un récap si besoin.
 
     Si pays_liste n'est pas fourni, vérifie tous les pays présents en base
     (fonctionne aussi bien en dev — un seul backend mutualisé pour 3 pays —
@@ -54,21 +60,24 @@ def verifier_et_notifier(pays_liste: list[str] | None = None) -> int:
             pays_liste = [row[0] for row in db.query(Lot.pays).distinct().all()]
 
         for pays in pays_liste:
-            destinataire = MANAGER_EMAILS.get(pays)
+            params = parametres.get_db(db, pays)
+            if not params.alertes_actives:
+                continue
+
+            destinataire = params.email_responsable or MANAGER_EMAILS.get(pays)
             if not destinataire:
                 logger.warning("Pas d'email de responsable configuré pour le pays %s", pays)
                 continue
 
-            lots_problematiques, _ = recuperer_alertes(db, pays)
-            anomalies_seuils = _anomalies_dernieres_mesures(db, pays)
-
-            if not lots_problematiques and not anomalies_seuils:
-                _dernier_recap_envoye.pop(pays, None)
+            # Aligne d'abord la table des alertes sur l'état courant : c'est elle
+            # qui dit ensuite ce qui reste à notifier.
+            gestion_alertes.synchroniser(db, pays)
+            a_notifier = gestion_alertes.alertes_sans_email(db, pays)
+            if not a_notifier:
                 continue
 
-            signature = _signature(lots_problematiques, anomalies_seuils)
-            if signature == _dernier_recap_envoye.get(pays):
-                continue  # situation inchangée depuis le dernier récap envoyé
+            lots_problematiques, _ = recuperer_alertes(db, pays)
+            anomalies_seuils = _anomalies_dernieres_mesures(db, pays)
 
             sujet, corps = construire_email_recap(pays, lots_problematiques, anomalies_seuils)
             resultat = _envoyer_si_possible(destinataire, sujet, corps, pays)
@@ -76,48 +85,20 @@ def verifier_et_notifier(pays_liste: list[str] | None = None) -> int:
                 return envoyes  # serveur SMTP inatteignable : on retentera au prochain cycle.
             if resultat:
                 envoyes += 1
-                _dernier_recap_envoye[pays] = signature
+                gestion_alertes.marquer_email_envoye(db, a_notifier)
     finally:
         db.close()
     return envoyes
 
 
-def _anomalies_dernieres_mesures(db, pays: str) -> list[tuple[Mesure, dict]]:
+def _anomalies_dernieres_mesures(db, pays: str) -> list[tuple]:
     """Anomalies (direction + sévérité) du DERNIER relevé de chaque entrepôt du pays."""
     entrepots = {l.entrepot_id for l in db.query(Lot).filter(Lot.pays == pays).all()}
-    if not entrepots:
-        return []
-
-    sous_requete = (
-        db.query(Mesure.entrepot_id, func.max(Mesure.timestamp).label("max_ts"))
-        .filter(Mesure.entrepot_id.in_(entrepots))
-        .group_by(Mesure.entrepot_id)
-        .subquery()
-    )
-    dernieres_mesures = (
-        db.query(Mesure)
-        .join(
-            sous_requete,
-            (Mesure.entrepot_id == sous_requete.c.entrepot_id)
-            & (Mesure.timestamp == sous_requete.c.max_ts),
-        )
-        .all()
-    )
-
     resultat = []
-    for mesure in dernieres_mesures:
+    for mesure in dernieres_mesures_par_entrepot(db, entrepots):
         for anomalie in evaluer_mesure(mesure.temperature, mesure.humidity, pays):
             resultat.append((mesure, anomalie))
     return resultat
-
-
-def _signature(lots_problematiques, anomalies_seuils) -> frozenset[str]:
-    cles_lots = {f"lot-{lot.id}" for lot, _ in lots_problematiques}
-    cles_seuils = {
-        f"seuil-{mesure.entrepot_id}-{anomalie['grandeur']}-{anomalie['direction']}"
-        for mesure, anomalie in anomalies_seuils
-    }
-    return frozenset(cles_lots | cles_seuils)
 
 
 def _envoyer_si_possible(destinataire: str, sujet: str, corps: str, pays: str) -> bool | None:

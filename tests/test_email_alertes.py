@@ -71,8 +71,9 @@ class TestEmailRecap:
 
 
 class TestNotifier:
-    def setup_method(self):
-        notifier._dernier_recap_envoye.clear()
+    # Plus de reset d'état mémoire : la déduplication des envois vit désormais
+    # dans la colonne alertes.email_envoye_le, et la fixture setup_db recrée
+    # les tables avant chaque test.
 
     def test_un_seul_email_pour_lot_perime_et_seuil_combines(self, db):
         _lot(db, "LOT-PERIME", 400)
@@ -157,9 +158,6 @@ class TestNotifier:
 
 
 class TestEndpointNotifier:
-    def setup_method(self):
-        notifier._dernier_recap_envoye.clear()
-
     def test_post_notifier_envoie_le_recap(self, client, db):
         _lot(db, "LOT-PERIME", 400)
 

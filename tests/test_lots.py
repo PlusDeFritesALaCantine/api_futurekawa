@@ -96,3 +96,38 @@ class TestEndpointsLots:
     def test_supprimer_lot_introuvable(self, client):
         r = client.delete("/lots/INEXISTANT")
         assert r.status_code == 404
+
+
+class TestModificationLot:
+    def test_patch_partiel_ne_vide_pas_les_autres_champs(self, client):
+        client.post("/lots", json={
+            "id": "LOT-PATCH", "pays": "bresil", "exploitation": "Fazenda Origine",
+            "entrepot_id": "entrepot-bresil-1", "date_stockage": "2026-01-10",
+        })
+
+        apres = client.patch("/lots/LOT-PATCH", json={"entrepot_id": "entrepot-bresil-2"}).json()
+
+        assert apres["entrepot_id"] == "entrepot-bresil-2"
+        assert apres["exploitation"] == "Fazenda Origine"
+        assert apres["date_stockage"] == "2026-01-10"
+
+    def test_patch_recalcule_le_statut(self, client):
+        client.post("/lots", json={
+            "id": "LOT-RECALC", "pays": "bresil", "exploitation": "F",
+            "entrepot_id": "entrepot-bresil-1", "date_stockage": "2026-09-01",
+        })
+        assert client.get("/lots/LOT-RECALC").json()["statut"] == "conforme"
+
+        apres = client.patch("/lots/LOT-RECALC", json={"date_stockage": "2020-01-01"}).json()
+
+        assert apres["statut"] == "perime"
+
+    def test_patch_vide_refuse(self, client):
+        client.post("/lots", json={
+            "id": "LOT-VIDE", "pays": "bresil", "exploitation": "F",
+            "entrepot_id": "entrepot-bresil-1", "date_stockage": "2026-01-10",
+        })
+        assert client.patch("/lots/LOT-VIDE", json={}).status_code == 400
+
+    def test_patch_lot_inconnu(self, client):
+        assert client.patch("/lots/INEXISTANT", json={"exploitation": "X"}).status_code == 404

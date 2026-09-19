@@ -1,20 +1,28 @@
 # api_futurekawa
 
-API REST FastAPI pour le pays Brésil — expose les lots de café, les mesures IoT et les alertes.
+API REST FastAPI pour le pays Brésil — expose les lots de café, les mesures IoT, les alertes
+et le paramétrage métier.
 
 ## Fonctionnalités
 
 - **Lots** (`app/routers/lots.py`) : création, liste (filtrable par pays, triée FIFO par
   date de stockage) et détail d'un lot ; statut (`conforme`/`perime`) recalculé à la volée
-  (`app/services/alertes.py::calculer_statut_lot`, péremption à 365 jours).
-- **Mesures** (`app/routers/mesures.py`) : historique (filtrable par `entrepot_id`) et
-  dernier relevé par entrepôt (filtrable par pays). Les lignes de `mesures` sont insérées
+  (`app/services/alertes.py::calculer_statut_lot`, péremption paramétrable par pays).
+- **Mesures** (`app/routers/mesures.py`) : historique **paginé et filtrable** (entrepôt, lot,
+  pays, plage de dates) et dernier relevé par entrepôt. Les lignes de `mesures` sont insérées
   par les scripts de `MQTT_Broker/` (`subscriber.py` pour le pipeline MQTT temps réel,
   `session_lot.py` pour les sessions de capture live), pas par cette API — elle est
   consommatrice (lecture) de ces données.
 - **Alertes & emails** (`app/routers/alertes.py`, `app/services/`) : détecte les lots
   périmés et les mesures hors seuil pays, et envoie un récapitulatif email au responsable
   d'exploitation concerné (voir [Dispositif d'alertes email](#dispositif-dalertes-email-cahier-des-charges-iii4)).
+- **Gestion des alertes** (`app/services/gestion_alertes.py`) : les alertes sont **persistées**
+  dans la table `alertes` avec un cycle de vie ouverte → prise en charge → résolue. La
+  résolution est automatique quand l'anomalie disparaît des relevés ; l'unicité d'une alerte
+  ouverte est garantie par un index unique partiel, pas par une structure en mémoire.
+- **Paramétrage** (`app/routers/parametres.py`, `app/services/parametres.py`) : seuils,
+  durée de péremption et destinataire des alertes sont stockés dans la table `pays` et
+  modifiables depuis le site. Une modification s'applique **sans redémarrage**.
 - **Deux modes de base de données** : PostgreSQL (pipeline temps réel partagé avec
   `MQTT_Broker`, `DB_URL`/`DATABASE_URL` sur le port `5433`) ou SQLite locale
   (`futurekawa.db`, utilisée par `start_all.sh` pour la démo front-end et alimentée par
@@ -50,10 +58,19 @@ uvicorn app.main:app --reload --port 8001
 | POST    | `/lots`                | Créer un lot                                     |
 | GET     | `/lots`                | Lister les lots (`?pays=` optionnel), triés FIFO date ASC |
 | GET     | `/lots/{id}`           | Détail d'un lot                                  |
-| GET     | `/mesures`             | Historique des mesures (`?entrepot_id=` optionnel) |
+| PATCH   | `/lots/{id}`           | Mise à jour partielle (fusion : les champs absents ne sont pas vidés) |
+| DELETE  | `/lots/{id}`           | Supprimer un lot et ses mesures (cascade)        |
+| GET     | `/mesures`             | Mesures **paginées** : `?entrepot_id=&lot_id=&pays=&debut=&fin=&limit=&offset=`. Réponse `{items, total, limit, offset}`, `limit` par défaut 100 et plafonnée à 1000 |
 | GET     | `/mesures/latest`      | Dernière mesure par entrepôt (`?pays=` optionnel) |
-| GET     | `/alertes`             | Lots périmés + mesures hors seuil                |
+| GET     | `/alertes`             | État courant calculé : lots périmés + mesures hors seuil |
+| GET     | `/alertes/journal`     | Alertes persistées, paginées (`?pays=&statut=ouverte\|acquittee\|resolue`) |
+| POST    | `/alertes/synchroniser`| Aligne la table des alertes sur l'état courant (idempotent) |
+| PATCH   | `/alertes/{id}/acquitter` | Prise en charge — l'alerte **reste ouverte**  |
+| PATCH   | `/alertes/{id}/resoudre`  | Clôture manuelle                            |
 | POST    | `/alertes/notifier`    | Déclenche immédiatement une vérification + envoi des emails en attente |
+| GET     | `/parametres/pays`     | Paramétrage des trois pays                       |
+| GET     | `/parametres/pays/{slug}` | Paramétrage d'un pays                         |
+| PATCH   | `/parametres/pays/{slug}` | Modifier seuils / péremption / destinataire (fusion partielle) |
 
 ## Variables d'environnement
 
@@ -63,14 +80,30 @@ uvicorn app.main:app --reload --port 8001
 | `API_PORT`                 | Port d'écoute                                 | `8001`                                                          |
 | `SMTP_HOST` / `SMTP_PORT`  | Serveur SMTP pour les emails d'alerte         | `localhost` / `1025` (Mailpit, voir ci-dessous)                 |
 | `SMTP_FROM`                | Adresse expéditeur des emails d'alerte        | `alertes@futurekawa.local`                                      |
-| `{PAYS}_MANAGER_EMAIL`     | Email du responsable d'exploitation par pays  | `responsable.{pays}@futurekawa.local`                            |
+| `{PAYS}_MANAGER_EMAIL`     | Destinataire initial des alertes. **Sert uniquement à amorcer la table `pays` au premier démarrage** ; ensuite la valeur en base fait foi | `responsable.{pays}@futurekawa.local` |
 | `ALERT_CHECK_INTERVAL_SECONDS` | Fréquence de vérification périodique      | `60`                                                             |
+| `ALERT_LOOP_ENABLED`       | Active la boucle de fond (synchro des alertes + e-mails). `0` pour la couper — réplica en lecture seule, ou tests | `1` |
 
-## Seuils métier (Brésil)
+## Seuils métier
 
-- Température : 29°C ±3°C → alerte si <26°C ou >32°C
-- Humidité : 55% ±2% → alerte si <53% ou >57%
-- Lot périmé si > 365 jours de stockage
+Les valeurs ci-dessous sont celles du cahier des charges. Elles **amorcent** la table `pays`
+au premier démarrage puis deviennent modifiables depuis le site ; elles servent aussi de repli
+lorsque le code est appelé hors contexte base (tests des fonctions pures).
+
+| Pays | Température | Humidité | Péremption |
+|---|---|---|---|
+| Brésil | 29 °C ± 3 → alerte hors 26–32 °C | 55 % ± 2 → alerte hors 53–57 % | 365 jours |
+| Équateur | 31 °C ± 3 | 60 % ± 2 | 365 jours |
+| Colombie | 26 °C ± 3 | 80 % ± 2 | 365 jours |
+
+Au-delà du **double** de la tolérance, l'alerte passe de `bas` à `critique`.
+
+```bash
+# Lire et modifier le paramétrage
+curl -s http://localhost:8001/parametres/pays | python3 -m json.tool
+curl -X PATCH http://localhost:8001/parametres/pays/bresil \
+     -H 'Content-Type: application/json' -d '{"peremption_jours":120}'
+```
 
 ## Dispositif d'alertes email (cahier des charges III.4)
 
@@ -78,23 +111,25 @@ uvicorn app.main:app --reload --port 8001
 d'exploitation du pays concerné (`{PAYS}_MANAGER_EMAIL`) pour chacune :
 - un lot dépasse 365 jours de stockage (péremption) ;
 - une mesure température/humidité sort de la plage acceptable du pays (seuils ci-dessus,
-  par pays dans `app/services/alertes.py::SEUILS_PAYS`).
+  par pays dans la table `pays`, cf. `app/services/parametres.py`).
 
 **Fréquence de vérification.** La boucle (`app/main.py`) tourne au démarrage de l'API
 puis toutes les `ALERT_CHECK_INTERVAL_SECONDS` secondes (60s par défaut). `POST
 /alertes/notifier` permet de forcer une vérification immédiate (utile en démo).
 
-**Déduplication.** Chaque alerte n'est notifiée qu'une fois : une clé (`lot-{pays}-{id}`
-ou `mesure-{pays}-{id}`) est gardée en mémoire du process (`app/services/notifier.py`).
-Limite connue de ce prototype : non persisté, donc remis à zéro si l'API redémarre — un
-déploiement réel le stockerait en base (cf. le champ `email_sent` du modèle `Alerte` de
-MQTT_Broker).
+**Déduplication.** Portée par la colonne `alertes.email_envoye_le`. Un récapitulatif ne part
+que s'il existe au moins une alerte ouverte dont l'e-mail n'est pas encore parti ; l'envoi
+horodate toutes celles du lot. **Cet état est en base, donc il survit au redémarrage** — la
+version précédente gardait un dictionnaire en mémoire, remis à zéro à chaque redémarrage, ce
+qui provoquait le renvoi de récapitulatifs déjà notifiés.
 
-**Contenu des emails** (`app/services/email.py`) :
-- *Lot périmé* — objet `[FutureKawa] Alerte lot {id} ({pays}) — lot périmé`, corps avec
-  exploitation, entrepôt, date de stockage et raison (nombre de jours).
-- *Mesure hors seuil* — objet `[FutureKawa] Alerte conditions de stockage — {entrepot} ({pays})`,
-  corps avec température, humidité, date du relevé et raison (seuil dépassé).
+`pays.alertes_actives = false` coupe les e-mails d'un pays sans aveugler la page Alertes :
+la synchronisation des alertes continue, seul l'envoi est suspendu.
+
+**Contenu des e-mails** (`app/services/email.py`) : **un seul récapitulatif par pays**, pas un
+e-mail par alerte. Objet `[FutureKawa] Récapitulatif alertes {pays} — N lot(s) périmé(s),
+M seuil(s) dépassé(s)` ; le corps liste chaque lot périmé (exploitation, entrepôt, raison) puis
+l'état des seuils par entrepôt à partir du dernier relevé.
 
 **Voir le fonctionnement en local (sans vrai serveur mail).** Le projet utilise
 [Mailpit](https://github.com/axllent/mailpit) comme faux serveur SMTP (service `mailpit`
@@ -113,9 +148,11 @@ curl -X POST http://localhost:8001/alertes/notifier
 
 ## Tests
 
+97 tests : règles métier, endpoints, paramétrage, cycle de vie des alertes, e-mails.
+
 ```bash
 pip install -r requirements.txt
-pytest
+pytest -q
 ```
 
 ## Seed (données de test)

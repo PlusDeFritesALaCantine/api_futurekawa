@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Lot, Mesure
-from app.schemas import LotCreate, LotOut, MesureOut
+from app.schemas import LotCreate, LotOut, LotUpdate, MesureOut
 from app.services.alertes import calculer_statut_lot
 
 router = APIRouter(prefix="/lots", tags=["lots"])
@@ -14,7 +14,7 @@ def creer_lot(lot: LotCreate, db: Session = Depends(get_db)):
     if db.get(Lot, lot.id):
         raise HTTPException(status_code=409, detail="Lot déjà existant")
     db_lot = Lot(**lot.model_dump())
-    db_lot.statut = calculer_statut_lot(lot.date_stockage)
+    db_lot.statut = calculer_statut_lot(lot.date_stockage, lot.pays)
     db.add(db_lot)
     db.commit()
     db.refresh(db_lot)
@@ -48,6 +48,29 @@ def lister_mesures_par_lot(lot_id: str, db: Session = Depends(get_db)):
     return lot.mesures
 
 
+@router.patch("/{lot_id}", response_model=LotOut)
+def modifier_lot(lot_id: str, maj: LotUpdate, db: Session = Depends(get_db)):
+    """Mise à jour partielle : seuls les champs fournis sont écrasés.
+
+    `exclude_unset=True` est ce qui garantit la fusion — un PATCH ne portant que
+    la date de stockage ne doit pas vider l'exploitation.
+    """
+    lot = db.get(Lot, lot_id)
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot introuvable")
+
+    champs = maj.model_dump(exclude_unset=True)
+    if not champs:
+        raise HTTPException(status_code=400, detail="Aucun champ à modifier")
+
+    for cle, valeur in champs.items():
+        setattr(lot, cle, valeur)
+
+    db.commit()
+    db.refresh(lot)
+    return _enrichir(lot)
+
+
 @router.delete("/{lot_id}", status_code=204)
 def supprimer_lot(lot_id: str, db: Session = Depends(get_db)):
     lot = db.get(Lot, lot_id)
@@ -58,6 +81,7 @@ def supprimer_lot(lot_id: str, db: Session = Depends(get_db)):
 
 
 def _enrichir(lot: Lot) -> LotOut:
-    statut = calculer_statut_lot(lot.date_stockage)
-    lot.statut = statut
+    # La péremption est paramétrée par pays : un lot colombien ne se juge pas
+    # avec la durée du Brésil.
+    lot.statut = calculer_statut_lot(lot.date_stockage, lot.pays)
     return LotOut.model_validate(lot)
