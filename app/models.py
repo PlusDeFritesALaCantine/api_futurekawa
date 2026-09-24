@@ -26,11 +26,7 @@ class Mesure(Base):
     temperature = Column(Float, nullable=False)
     humidity = Column(Float, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Clé étrangère pointant sur la table lots
     lot_id = Column(String(50), ForeignKey("lots.id"), nullable=True)
-
-    # Relation permettant de faire : my_mesure.lot
     lot = relationship("Lot", back_populates="mesures")
 
 
@@ -85,8 +81,8 @@ class Alerte(Base):
     lot_id = Column(String(50), ForeignKey("lots.id"), nullable=True)
     mesure_id = Column(String(50), ForeignKey("mesures.id"), nullable=True)
 
-    type = Column(String(20), nullable=False)      # temperature | humidite | peremption
-    severite = Column(String(20), nullable=False)  # bas | critique
+    type = Column(String(20), nullable=False)
+    severite = Column(String(20), nullable=False)
     message = Column(String(255), nullable=False)
 
     cle_dedup = Column(String(200), nullable=False)
@@ -98,9 +94,6 @@ class Alerte(Base):
     resolue_le = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        # Index unique PARTIEL : deux alertes peuvent partager la même clé dans
-        # l'historique, mais une seule peut être ouverte à un instant donné.
-        # SQLite (>= 3.8) comme PostgreSQL acceptent la clause WHERE.
         Index(
             "idx_alerte_ouverte_unique",
             "cle_dedup",

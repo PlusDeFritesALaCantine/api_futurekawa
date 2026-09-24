@@ -62,21 +62,6 @@ def generer_mesures(seed: int, jours_historique: float, intervalle_heures: float
     return mesures
 
 
-# Chaque lot a son propre entrepôt -> sa propre courbe. Champs :
-# (lot_id, exploitation, age_jours, entrepot, jours_historique_mesures, intervalle_h,
-#  bruit_temp, bruit_hum, derive_temp, derive_hum, amplitude_temp, amplitude_hum, periode_jours)
-#
-# Profils choisis à partir d'un climat réaliste par pays (cf. recherche climat régions
-# caféières) :
-#  - Brésil (Minas Gerais, ~29°C/55% visé) : climat le plus proche de la zone de confort
-#    universelle du café vert (20-25°C/50-60%RH) -> globalement stable, un incident
-#    (panne de ventilation -> dérive de température sur le lot périmé).
-#  - Équateur (entrepôt supposé déshumidifié activement, le climat côtier ambiant étant
-#    très humide ~90%RH) -> le plus calme des 3, mais pas épargné : un bref incident
-#    d'humidité (maintenance du déshumidificateur) sur le lot ancien.
-#  - Colombie (~26°C/80% visé, saisons des pluies/sécheresse marquées Eje Cafetero) ->
-#    le plus exposé, mais volontairement contenu à 1 lot périmé + 1 lot à risque
-#    (pas davantage, pour ne pas saturer les alertes).
 PAYS_DATA = {
     "bresil": [
         # Récent : excellent, oscillation modeste.

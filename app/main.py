@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     tache.cancel()
 
 
-app = FastAPI(title="FutureKawa API — Brésil", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="FutureKawa API", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

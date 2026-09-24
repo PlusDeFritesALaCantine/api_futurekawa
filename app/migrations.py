@@ -24,15 +24,13 @@ def synchroniser_schema(engine: Engine) -> None:
 
     for table in Base.metadata.sorted_tables:
         if table.name not in tables_existantes:
-            continue  # create_all() vient de la créer, elle est à jour.
+            continue
 
         colonnes_en_base = {col["name"] for col in inspecteur.get_columns(table.name)}
         for colonne in table.columns:
             if colonne.name in colonnes_en_base:
                 continue
             if not colonne.nullable or colonne.primary_key:
-                # ADD COLUMN NOT NULL sans valeur par défaut échouerait sur les lignes
-                # déjà en base : cette évolution-là demande une vraie migration.
                 logger.warning(
                     "Colonne %s.%s absente et non nullable : migration manuelle requise.",
                     table.name, colonne.name,
@@ -41,8 +39,6 @@ def synchroniser_schema(engine: Engine) -> None:
 
             type_sql = colonne.type.compile(engine.dialect)
             ddl = f"ALTER TABLE {table.name} ADD COLUMN {colonne.name} {type_sql}"
-            # La colonne étant nullable (donc sans valeur par défaut), SQLite comme
-            # PostgreSQL acceptent d'ajouter la clé étrangère dans le même ALTER.
             for fk in colonne.foreign_keys:
                 ddl += f" REFERENCES {fk.column.table.name}({fk.column.name})"
             with engine.begin() as connexion:

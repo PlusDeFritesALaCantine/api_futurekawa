@@ -69,8 +69,6 @@ class AlertesResponse(BaseModel):
     lots_problematiques: list[AlerteLot]
     mesures_hors_seuil: list[AlerteMesure]
 
-# --- Paramétrage par pays -------------------------------------------------
-
 class ParametresPaysOut(BaseModel):
     slug: str
     nom: str
@@ -100,9 +98,6 @@ class ParametresPaysUpdate(BaseModel):
     peremption_jours: Optional[int] = Field(None, gt=0, le=3650)
     email_responsable: Optional[str] = Field(None, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     alertes_actives: Optional[bool] = None
-
-
-# --- Alertes persistées ---------------------------------------------------
 
 class AlerteOut(BaseModel):
     id: str
@@ -143,9 +138,6 @@ class SynchroAlertesOut(BaseModel):
     ouvertures: int
     mises_a_jour: int
     resolutions: int
-
-
-# --- Pagination des mesures ----------------------------------------------
 
 class PageMesures(BaseModel):
     items: list[MesureOut]
