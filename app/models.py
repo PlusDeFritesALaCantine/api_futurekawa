@@ -5,101 +5,100 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
-class Lot(Base):
-    __tablename__ = "lots"
+class Batch(Base):
+    __tablename__ = "batches"
 
     id = Column(String(50), primary_key=True)
-    pays = Column(String(50), nullable=False)
-    exploitation = Column(String(100), nullable=False)
-    entrepot_id = Column(String(50), nullable=False)
-    date_stockage = Column(Date, nullable=False)
-    statut = Column(String(20), default="conforme")
+    country = Column(String(50), nullable=False)
+    farm = Column(String(100), nullable=False)
+    warehouse_id = Column(String(50), nullable=False)
+    storage_date = Column(Date, nullable=False)
+    status = Column(String(20), default="compliant")
 
-    mesures = relationship("Mesure", back_populates="lot", cascade="all, delete-orphan")
+    measures = relationship("Measure", back_populates="batch", cascade="all, delete-orphan")
 
 
-class Mesure(Base):
-    __tablename__ = "mesures"
+class Measure(Base):
+    __tablename__ = "measures"
 
     id = Column(String(50), primary_key=True)
-    entrepot_id = Column(String(50), nullable=False)
+    warehouse_id = Column(String(50), nullable=False)
     temperature = Column(Float, nullable=False)
     humidity = Column(Float, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    lot_id = Column(String(50), ForeignKey("lots.id"), nullable=True)
-    lot = relationship("Lot", back_populates="mesures")
+    batch_id = Column(String(50), ForeignKey("batches.id"), nullable=True)
+    batch = relationship("Batch", back_populates="measures")
 
 
-class Pays(Base):
-    """Paramétrage métier d'un pays : seuils, péremption, destinataire des alertes.
+class Country(Base):
+    """Per-country business settings: thresholds, shelf life, alert recipient.
 
-    Remplace les trois copies divergentes des seuils (constantes Python dans
-    services/alertes.py, config/seuils.ts côté front, seed.py du broker MQTT).
-    La clé primaire est le slug ('bresil') parce que c'est déjà l'identifiant
-    public utilisé par l'API, le front et les topics MQTT : une clé technique
-    obligerait à traduire à chaque appel sans rien apporter ici.
+    Replaces the three divergent copies of the thresholds (Python constants in
+    services/alerts.py, config/seuils.ts on the front-end, seed.py of the MQTT
+    broker). The primary key is the slug ('brazil') because it is already the
+    public identifier used by the API, the front-end and MQTT topics: a technical
+    key would force a translation on every call without adding anything here.
     """
 
-    __tablename__ = "pays"
+    __tablename__ = "countries"
 
     slug = Column(String(20), primary_key=True)
-    nom = Column(String(60), nullable=False)
+    name = Column(String(60), nullable=False)
 
-    temperature_ideale = Column(Float, nullable=False)
+    ideal_temperature = Column(Float, nullable=False)
     temperature_tolerance = Column(Float, nullable=False)
-    humidite_ideale = Column(Float, nullable=False)
-    humidite_tolerance = Column(Float, nullable=False)
+    ideal_humidity = Column(Float, nullable=False)
+    humidity_tolerance = Column(Float, nullable=False)
 
-    peremption_jours = Column(Integer, nullable=False, default=365)
-    email_responsable = Column(String(120), nullable=False)
-    alertes_actives = Column(Boolean, nullable=False, default=True)
+    shelf_life_days = Column(Integer, nullable=False, default=365)
+    manager_email = Column(String(120), nullable=False)
+    alerts_enabled = Column(Boolean, nullable=False, default=True)
 
-    maj_le = Column(
+    updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
-class Alerte(Base):
-    """Alerte persistée, avec son cycle de vie : ouverte -> acquittée -> résolue.
+class Alert(Base):
+    """Persisted alert, with its lifecycle: open -> acknowledged -> resolved.
 
-    Avant, les alertes étaient recalculées à chaque lecture et la déduplication
-    des e-mails vivait dans un dict en mémoire, remis à zéro à chaque
-    redémarrage. `cle_dedup` porte un index unique partiel (limité aux alertes
-    non résolues) : c'est la base qui garantit désormais qu'une même anomalie
-    ne rouvre pas une seconde alerte, et ça survit au redémarrage.
+    Alerts used to be recomputed on every read and e-mail deduplication lived in
+    an in-memory dict, reset on every restart. `dedup_key` carries a partial
+    unique index (limited to unresolved alerts): the database now guarantees that
+    a given anomaly cannot open a second alert, and that survives restarts.
 
-    `resolue_le` est posée automatiquement quand l'anomalie disparaît des
-    relevés ; `acquittee_le` est posée par un humain depuis le site et ne
-    ferme pas l'alerte — elle dit seulement que quelqu'un l'a prise en charge.
+    `resolved_at` is set automatically when the anomaly disappears from the
+    readings; `acknowledged_at` is set by a human from the site and does not
+    close the alert — it only records that someone has taken it on.
     """
 
-    __tablename__ = "alertes"
+    __tablename__ = "alerts"
 
     id = Column(String(50), primary_key=True)
-    pays = Column(String(50), nullable=False, index=True)
-    entrepot_id = Column(String(50), nullable=False)
-    lot_id = Column(String(50), ForeignKey("lots.id"), nullable=True)
-    mesure_id = Column(String(50), ForeignKey("mesures.id"), nullable=True)
+    country = Column(String(50), nullable=False, index=True)
+    warehouse_id = Column(String(50), nullable=False)
+    batch_id = Column(String(50), ForeignKey("batches.id"), nullable=True)
+    measure_id = Column(String(50), ForeignKey("measures.id"), nullable=True)
 
     type = Column(String(20), nullable=False)
-    severite = Column(String(20), nullable=False)
+    severity = Column(String(20), nullable=False)
     message = Column(String(255), nullable=False)
 
-    cle_dedup = Column(String(200), nullable=False)
+    dedup_key = Column(String(200), nullable=False)
 
-    declenchee_le = Column(DateTime(timezone=True), server_default=func.now())
-    email_envoye_le = Column(DateTime(timezone=True), nullable=True)
-    acquittee_le = Column(DateTime(timezone=True), nullable=True)
-    acquittee_par = Column(String(120), nullable=True)
-    resolue_le = Column(DateTime(timezone=True), nullable=True)
+    triggered_at = Column(DateTime(timezone=True), server_default=func.now())
+    emailed_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_by = Column(String(120), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index(
-            "idx_alerte_ouverte_unique",
-            "cle_dedup",
+            "idx_alert_open_unique",
+            "dedup_key",
             unique=True,
-            sqlite_where=text("resolue_le IS NULL"),
-            postgresql_where=text("resolue_le IS NULL"),
+            sqlite_where=text("resolved_at IS NULL"),
+            postgresql_where=text("resolved_at IS NULL"),
         ),
-        Index("idx_alerte_pays_ouverte", "pays", "resolue_le"),
+        Index("idx_alert_country_open", "country", "resolved_at"),
     )

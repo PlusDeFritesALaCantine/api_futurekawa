@@ -32,8 +32,8 @@ spec:
               value: "mailpit-service"
             - name: SMTP_PORT
               value: "1025"
-            - name: BRESIL_MANAGER_EMAIL
-              value: "responsable@futurekawa.local"
+            - name: BRAZIL_MANAGER_EMAIL
+              value: "manager@futurekawa.local"
           resources:
             limits:
               cpu: "500m"

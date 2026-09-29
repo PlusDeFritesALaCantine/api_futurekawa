@@ -3,144 +3,146 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class LotCreate(BaseModel):
+class BatchCreate(BaseModel):
     id: str
-    pays: str
-    exploitation: str
-    entrepot_id: str
-    date_stockage: date
+    country: str
+    farm: str
+    warehouse_id: str
+    storage_date: date
 
 
-class LotUpdate(BaseModel):
-    """Mise à jour partielle d'un lot. Utilisée par la synchronisation descendante
-    depuis Odoo et par le siège. `statut` n'est volontairement pas modifiable :
-    il est recalculé à partir de la date de stockage et de la péremption du pays."""
+class BatchUpdate(BaseModel):
+    """Partial update of a batch. Used by downstream synchronisation from Odoo
+    and by the head office. `status` is deliberately not editable: it is
+    recomputed from the storage date and the shelf life of the country."""
 
-    pays: Optional[str] = Field(None, min_length=1, max_length=50)
-    exploitation: Optional[str] = Field(None, min_length=1, max_length=100)
-    entrepot_id: Optional[str] = Field(None, min_length=1, max_length=50)
-    date_stockage: Optional[date] = None
+    country: Optional[str] = Field(None, min_length=1, max_length=50)
+    farm: Optional[str] = Field(None, min_length=1, max_length=100)
+    warehouse_id: Optional[str] = Field(None, min_length=1, max_length=50)
+    storage_date: Optional[date] = None
 
 
-class LotOut(BaseModel):
+class BatchOut(BaseModel):
     id: str
-    pays: str
-    exploitation: str
-    entrepot_id: str
-    date_stockage: date
-    statut: str
+    country: str
+    farm: str
+    warehouse_id: str
+    storage_date: date
+    status: str
 
     model_config = {"from_attributes": True}
 
 
-class MesureCreate(BaseModel):
+class MeasureCreate(BaseModel):
     id: str
-    entrepot_id: str
+    warehouse_id: str
     temperature: float
     humidity: float
-    lot_id: Optional[str] = None
+    batch_id: Optional[str] = None
 
 
-class MesureOut(BaseModel):
+
+class MeasureOut(BaseModel):
     id: str
-    entrepot_id: str
+    warehouse_id: str
     temperature: float
     humidity: float
     timestamp: datetime
-    lot_id: Optional[str] = None
+    batch_id: Optional[str] = None
     
-    lot: Optional[LotOut] = None
+    batch: Optional[BatchOut] = None
 
     model_config = {"from_attributes": True}
 
 
-class AlerteLot(BaseModel):
-    lot: LotOut
-    raison: str
+class BatchAlert(BaseModel):
+    batch: BatchOut
+    reason: str
 
 
-class AlerteMesure(BaseModel):
-    mesure: MesureOut
-    raison: str
-    severite: str
+class MeasureAlert(BaseModel):
+    measure: MeasureOut
+    reason: str
+    severity: str
 
 
-class AlertesResponse(BaseModel):
-    lots_problematiques: list[AlerteLot]
-    mesures_hors_seuil: list[AlerteMesure]
+class AlertsResponse(BaseModel):
+    problematic_batches: list[BatchAlert]
+    out_of_range_measures: list[MeasureAlert]
 
-class ParametresPaysOut(BaseModel):
+class CountrySettingsOut(BaseModel):
     slug: str
-    nom: str
-    temperature_ideale: float
+    name: str
+    ideal_temperature: float
     temperature_tolerance: float
-    humidite_ideale: float
-    humidite_tolerance: float
-    peremption_jours: int
-    email_responsable: str
-    alertes_actives: bool
+    ideal_humidity: float
+    humidity_tolerance: float
+    shelf_life_days: int
+    manager_email: str
+    alerts_enabled: bool
 
     model_config = {"from_attributes": True}
 
 
-class ParametresPaysUpdate(BaseModel):
-    """Mise à jour partielle : seuls les champs fournis sont écrasés.
+class CountrySettingsUpdate(BaseModel):
+    """Partial update: only the supplied fields are overwritten.
 
-    Tous les champs sont optionnels et le routeur applique model_dump(exclude_unset=True) :
-    un PATCH qui ne porte que la péremption ne remet pas les seuils à zéro.
+    Every field is optional and the router applies model_dump(exclude_unset=True):
+    a PATCH that only carries the shelf life does not reset the thresholds to
+    zero.
     """
 
-    nom: Optional[str] = Field(None, min_length=1, max_length=60)
-    temperature_ideale: Optional[float] = Field(None, ge=-50, le=80)
+    name: Optional[str] = Field(None, min_length=1, max_length=60)
+    ideal_temperature: Optional[float] = Field(None, ge=-50, le=80)
     temperature_tolerance: Optional[float] = Field(None, gt=0, le=50)
-    humidite_ideale: Optional[float] = Field(None, ge=0, le=100)
-    humidite_tolerance: Optional[float] = Field(None, gt=0, le=50)
-    peremption_jours: Optional[int] = Field(None, gt=0, le=3650)
-    email_responsable: Optional[str] = Field(None, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    alertes_actives: Optional[bool] = None
+    ideal_humidity: Optional[float] = Field(None, ge=0, le=100)
+    humidity_tolerance: Optional[float] = Field(None, gt=0, le=50)
+    shelf_life_days: Optional[int] = Field(None, gt=0, le=3650)
+    manager_email: Optional[str] = Field(None, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    alerts_enabled: Optional[bool] = None
 
-class AlerteOut(BaseModel):
+class AlertOut(BaseModel):
     id: str
-    pays: str
-    entrepot_id: str
-    lot_id: Optional[str] = None
-    mesure_id: Optional[str] = None
+    country: str
+    warehouse_id: str
+    batch_id: Optional[str] = None
+    measure_id: Optional[str] = None
     type: str
-    severite: str
+    severity: str
     message: str
-    declenchee_le: Optional[datetime] = None
-    email_envoye_le: Optional[datetime] = None
-    acquittee_le: Optional[datetime] = None
-    acquittee_par: Optional[str] = None
-    resolue_le: Optional[datetime] = None
+    triggered_at: Optional[datetime] = None
+    emailed_at: Optional[datetime] = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
     @property
-    def statut(self) -> str:
-        if self.resolue_le is not None:
-            return "resolue"
-        return "acquittee" if self.acquittee_le is not None else "ouverte"
+    def status(self) -> str:
+        if self.resolved_at is not None:
+            return "resolved"
+        return "acknowledged" if self.acknowledged_at is not None else "open"
 
 
-class PageAlertes(BaseModel):
-    items: list[AlerteOut]
+class AlertPage(BaseModel):
+    items: list[AlertOut]
     total: int
     limit: int
     offset: int
 
 
-class AcquittementIn(BaseModel):
-    par: Optional[str] = Field(None, max_length=120)
+class AcknowledgeIn(BaseModel):
+    by: Optional[str] = Field(None, max_length=120)
 
 
-class SynchroAlertesOut(BaseModel):
-    ouvertures: int
-    mises_a_jour: int
-    resolutions: int
+class AlertSyncOut(BaseModel):
+    opened: int
+    updated: int
+    resolved: int
 
-class PageMesures(BaseModel):
-    items: list[MesureOut]
+class MeasurePage(BaseModel):
+    items: list[MeasureOut]
     total: int
     limit: int
     offset: int

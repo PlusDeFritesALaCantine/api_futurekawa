@@ -7,79 +7,72 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import SessionLocal, engine
-from app.migrations import synchroniser_schema
+from app.migrations import sync_schema
 from app.models import Base
-from app.routers import alertes, lots, mesures, parametres
-from app.services import gestion_alertes
-from app.services import parametres as svc_parametres
-from app.services.notifier import verifier_et_notifier
+from app.routers import alerts, batches, measures, parameters
+from app.services import alert_lifecycle, parameters as svc_parameters
+from app.services.notifier import check_and_notify
 
 Base.metadata.create_all(bind=engine)
-synchroniser_schema(engine)
+sync_schema(engine)
 
 logger = logging.getLogger(__name__)
 
 ALERT_CHECK_INTERVAL_SECONDS = int(os.getenv("ALERT_CHECK_INTERVAL_SECONDS", "60"))
-
-# Boucle de fond désactivable. Utile sur un réplica en lecture seule, qui ne doit
-# ni écrire d'alertes ni envoyer d'e-mails, et dans les tests : un ordonnanceur
-# qui démarre en même temps que le client rend les assertions d'envoi d'e-mail
-# dépendantes du hasard d'ordonnancement.
 ALERT_LOOP_ENABLED = os.getenv("ALERT_LOOP_ENABLED", "1").lower() not in ("0", "false", "no")
 
 
-def _amorcer_parametres() -> None:
-    """Crée les lignes de la table `pays` manquantes, à partir du cahier des charges.
+def _load_parameters() -> None:
+    """Warms the settings cache from the `countries` table.
 
-    Idempotent : un pays déjà paramétré depuis le site garde ses valeurs.
+    Read-only: nothing is created or written here. Until a country row exists,
+    services/parameters.py falls back to its DEFAULTS constants.
     """
     db = SessionLocal()
     try:
-        crees = svc_parametres.initialiser(db)
-        if crees:
-            logger.info("Paramétrage initial créé pour %s pays", crees)
+        loaded = svc_parameters.reload(db)
+        logger.info("Loaded settings for %s countries", len(loaded))
     except Exception:
-        logger.exception("Impossible d'amorcer le paramétrage des pays")
+        logger.exception("Could not load the country settings")
     finally:
         db.close()
 
 
-def _cycle_alertes() -> None:
-    """Un tour complet : aligner la table des alertes, puis notifier.
+def _alert_cycle() -> None:
+    """A full cycle: align the alerts table, then notify.
 
-    La synchronisation est faite pour tous les pays, y compris ceux dont les
-    e-mails sont désactivés : couper les notifications ne doit pas aveugler la
-    page Alertes du site.
+    The synchronisation is done for every country, including those with e-mails
+    disabled: turning notifications off must not blind the site's Alerts page.
     """
     db = SessionLocal()
     try:
-        gestion_alertes.synchroniser(db)
+        alert_lifecycle.sync(db)
     except Exception:
-        logger.exception("Erreur durant la synchronisation des alertes")
+        logger.exception("Error during alert synchronisation")
     finally:
         db.close()
-    verifier_et_notifier()
+    check_and_notify()
 
 
-async def _boucle_verification_alertes():
+async def _alert_check_loop():
     while True:
         try:
-            await asyncio.to_thread(_cycle_alertes)
+            await asyncio.to_thread(_alert_cycle)
         except Exception:
-            logger.exception("Erreur durant la vérification périodique des alertes")
+            logger.exception("Error during the periodic alert check")
         await asyncio.sleep(ALERT_CHECK_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _amorcer_parametres()
+    _load_parameters()
     if not ALERT_LOOP_ENABLED:
-        logger.info("Boucle d'alertes désactivée (ALERT_LOOP_ENABLED)")
+        logger.info("Alert loop disabled (ALERT_LOOP_ENABLED)")
         yield
         return
-    tache = asyncio.create_task(_boucle_verification_alertes())
+    task = asyncio.create_task(_alert_check_loop())
     yield
-    tache.cancel()
+    task.cancel()
 
 
 app = FastAPI(title="FutureKawa API", version="1.1.0", lifespan=lifespan)
@@ -91,10 +84,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(lots.router)
-app.include_router(mesures.router)
-app.include_router(alertes.router)
-app.include_router(parametres.router)
+app.include_router(batches.router)
+app.include_router(measures.router)
+app.include_router(alerts.router)
+app.include_router(parameters.router)
 
 
 @app.get("/health")

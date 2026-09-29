@@ -48,7 +48,7 @@ jobs:
             | tar -xz gitleaks
 
       - name: Run gitleaks
-        # Retire "|| true" pour rendre le job bloquant
+        # Remove "|| true" to make the job blocking
         run: ./gitleaks detect --source . --redact --report-format sarif --report-path gitleaks.sarif --exit-code 1 || true
 
       - name: Upload report

@@ -17,14 +17,33 @@ engine = create_engine(SQLALCHEMY_TEST_URL, connect_args={"check_same_thread": F
 TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def seed_countries(db) -> int:
+    """Persists the DEFAULTS constants as real `countries` rows.
+
+    Test-only. The application never does this: services/parameters.py keeps
+    DEFAULTS as a read-only fallback and never writes. Tests that exercise the
+    settings endpoints need actual rows, so the seeding is done here, explicitly.
+    """
+    from app.models import Country
+    from app.services.parameters import DEFAULTS
+
+    created = 0
+    for slug, values in DEFAULTS.items():
+        if db.get(Country, slug) is None:
+            db.add(Country(slug=slug, alerts_enabled=True, **values))
+            created += 1
+    db.commit()
+    return created
+
+
 @pytest.fixture(autouse=True)
 def setup_db():
-    from app.services import parametres
+    from app.services import parameters
 
     Base.metadata.create_all(bind=engine)
-    parametres.invalider()
+    parameters.invalidate()
     yield
-    parametres.invalider()
+    parameters.invalidate()
     Base.metadata.drop_all(bind=engine)
 
 

@@ -1,119 +1,116 @@
-"""Déclenchement de l'email récapitulatif d'alertes (cahier des charges III.4).
+"""Triggering of the alert summary e-mail (specification III.4).
 
-Règles : un récapitulatif est envoyé au responsable d'exploitation du pays
-concerné s'il existe au moins une alerte ouverte dont l'e-mail n'est pas encore
-parti :
-  - un lot dépasse la durée de péremption paramétrée pour son pays ;
-  - le dernier relevé température/humidité d'un entrepôt est classé "bas" ou
-    "critique" sur l'échelle de qualité (excellent/bon/correct/bas/critique,
-    cf. app/services/alertes.py) — les tiers excellent/bon/correct ne
-    déclenchent jamais d'email.
+Rules: a summary is sent to the operations manager of the country concerned if
+there is at least one open alert whose e-mail has not been sent yet:
+  - a batch exceeds the shelf life duration configured for its country;
+  - the latest temperature/humidity reading of a warehouse is classified "low"
+    or "critical" on the quality scale (excellent/good/fair/low/critical,
+    cf. app/services/alerts.py) — the excellent/good/fair tiers never trigger an
+    e-mail.
 
-Contrairement à une notification par alerte individuelle, on ne regarde que
-le DERNIER relevé de chaque entrepôt pour les seuils — les alertes reflètent
-l'état courant ("les infos tous les X temps"), pas l'historique complet.
+Unlike a notification per individual alert, only the LATEST reading of each
+warehouse is considered for the thresholds — alerts reflect the current state
+("the same info every X time"), not the full history.
 
-Fréquence de vérification : appelée au démarrage de l'API puis toutes les
-ALERT_CHECK_INTERVAL_SECONDS secondes (60s par défaut, voir app/main.py),
-ainsi que manuellement via POST /alertes/notifier.
+Check frequency: called when the API starts then every
+ALERT_CHECK_INTERVAL_SECONDS seconds (60 by default, see app/main.py), and
+manually via POST /alerts/notify.
 
-Dédoublonnage : porté par la colonne `alertes.email_envoye_le`, pas par un
-dictionnaire en mémoire. Tant qu'aucune alerte nouvelle n'apparaît, aucun
-nouveau récap ne part ; et, contrairement à la version précédente, l'état
-survit au redémarrage de l'API — un redémarrage ne provoque plus un second
-envoi pour des alertes déjà notifiées.
+Deduplication: carried by the `alerts.emailed_at` column, not by an in-memory
+dictionary. As long as no new alert appears, no new summary goes out; and,
+unlike the previous version, the state survives an API restart — a restart no
+longer triggers a second send for alerts already notified.
 
-Le destinataire et l'activation des e-mails viennent de la table `pays`
-(modifiables depuis le site) ; MANAGER_EMAILS ne sert plus que de repli
-lorsqu'aucun paramétrage n'existe encore.
+The recipient and the e-mail toggle come from the `countries` table (editable
+from the site); MANAGER_EMAILS is only a fallback for when no settings exist yet.
 """
 
 import logging
 
 from app.database import SessionLocal
-from app.models import Lot
-from app.services import gestion_alertes, parametres
-from app.services.alertes import (
-    dernieres_mesures_par_entrepot, evaluer_mesure, recuperer_alertes,
+from app.models import Batch
+from app.services import alert_lifecycle, parameters
+from app.services.alerts import (
+    latest_measures_per_warehouse, evaluate_measure, compute_alerts,
 )
 from app.services.email import (
-    MANAGER_EMAILS, SMTP_HOST, SMTP_PORT, construire_email_recap, envoyer_email,
+    MANAGER_EMAILS, SMTP_HOST, SMTP_PORT, build_summary_email, send_email,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def verifier_et_notifier(pays_liste: list[str] | None = None) -> int:
-    """Vérifie l'état des alertes par pays et envoie un récap si besoin.
+def check_and_notify(country_list: list[str] | None = None) -> int:
+    """Checks the alert state per country and sends a summary if needed.
 
-    Si pays_liste n'est pas fourni, vérifie tous les pays présents en base
-    (fonctionne aussi bien en dev — un seul backend mutualisé pour 3 pays —
-    qu'en architecture cible — un backend par pays, qui ne verra que les
-    lots de son propre pays).
+    If country_list is not provided, checks every country present in the database
+    (works both in dev — a single shared backend for 3 countries — and in the
+    target architecture — one backend per country, which only sees the batches of
+    its own country).
 
-    Retourne le nombre de récaps effectivement envoyés.
+    Returns the number of summaries actually sent.
     """
     db = SessionLocal()
-    envoyes = 0
+    sent = 0
     try:
-        if pays_liste is None:
-            pays_liste = [row[0] for row in db.query(Lot.pays).distinct().all()]
+        if country_list is None:
+            country_list = [row[0] for row in db.query(Batch.country).distinct().all()]
 
-        for pays in pays_liste:
-            params = parametres.get_db(db, pays)
-            if not params.alertes_actives:
+        for country in country_list:
+            params = parameters.get_from_db(db, country)
+            if not params.alerts_enabled:
                 continue
 
-            destinataire = params.email_responsable or MANAGER_EMAILS.get(pays)
-            if not destinataire:
-                logger.warning("Pas d'email de responsable configuré pour le pays %s", pays)
+            recipient = params.manager_email or MANAGER_EMAILS.get(country)
+            if not recipient:
+                logger.warning("No manager e-mail configured for country %s", country)
                 continue
 
-            # Aligne d'abord la table des alertes sur l'état courant : c'est elle
-            # qui dit ensuite ce qui reste à notifier.
-            gestion_alertes.synchroniser(db, pays)
-            a_notifier = gestion_alertes.alertes_sans_email(db, pays)
-            if not a_notifier:
+            # First aligns the alerts table with the current state: it is that
+            # table which then says what is left to notify.
+            alert_lifecycle.sync(db, country)
+            to_notify = alert_lifecycle.alerts_pending_email(db, country)
+            if not to_notify:
                 continue
 
-            lots_problematiques, _ = recuperer_alertes(db, pays)
-            anomalies_seuils = _anomalies_dernieres_mesures(db, pays)
+            problematic_batches, _ = compute_alerts(db, country)
+            threshold_anomalies = _latest_measure_anomalies(db, country)
 
-            sujet, corps = construire_email_recap(pays, lots_problematiques, anomalies_seuils)
-            resultat = _envoyer_si_possible(destinataire, sujet, corps, pays)
-            if resultat is None:
-                return envoyes  # serveur SMTP inatteignable : on retentera au prochain cycle.
-            if resultat:
-                envoyes += 1
-                gestion_alertes.marquer_email_envoye(db, a_notifier)
+            subject, body = build_summary_email(country, problematic_batches, threshold_anomalies)
+            result = _send_if_possible(recipient, subject, body, country)
+            if result is None:
+                return sent  # SMTP server unreachable: we will retry next cycle.
+            if result:
+                sent += 1
+                alert_lifecycle.mark_emailed(db, to_notify)
     finally:
         db.close()
-    return envoyes
+    return sent
 
 
-def _anomalies_dernieres_mesures(db, pays: str) -> list[tuple]:
-    """Anomalies (direction + sévérité) du DERNIER relevé de chaque entrepôt du pays."""
-    entrepots = {l.entrepot_id for l in db.query(Lot).filter(Lot.pays == pays).all()}
-    resultat = []
-    for mesure in dernieres_mesures_par_entrepot(db, entrepots):
-        for anomalie in evaluer_mesure(mesure.temperature, mesure.humidity, pays):
-            resultat.append((mesure, anomalie))
-    return resultat
+def _latest_measure_anomalies(db, country: str) -> list[tuple]:
+    """Anomalies (direction + severity) of the LATEST reading of each warehouse in the country."""
+    warehouses = {b.warehouse_id for b in db.query(Batch).filter(Batch.country == country).all()}
+    result = []
+    for measure in latest_measures_per_warehouse(db, warehouses):
+        for anomaly in evaluate_measure(measure.temperature, measure.humidity, country):
+            result.append((measure, anomaly))
+    return result
 
 
-def _envoyer_si_possible(destinataire: str, sujet: str, corps: str, pays: str) -> bool | None:
-    """Envoie le récap. Retourne True (envoyé), False (échec ponctuel) ou None
-    (serveur SMTP inatteignable — inutile de retenter les pays suivants ce cycle)."""
+def _send_if_possible(recipient: str, subject: str, body: str, country: str) -> bool | None:
+    """Sends the summary. Returns True (sent), False (one-off failure) or None
+    (SMTP server unreachable — no point retrying the other countries this cycle)."""
     try:
-        envoyer_email(destinataire, sujet, corps)
+        send_email(recipient, subject, body)
     except OSError as exc:
         logger.warning(
-            "Serveur SMTP inatteignable (%s:%s) — récap en attente, retenté au prochain cycle : %s",
+            "SMTP server unreachable (%s:%s) — summary pending, retried next cycle: %s",
             SMTP_HOST, SMTP_PORT, exc,
         )
         return None
     except Exception:
-        logger.exception("Échec d'envoi du récap d'alertes pour %s", pays)
+        logger.exception("Failed to send the alert summary for %s", country)
         return False
-    logger.info("Récap d'alertes envoyé pour %s à %s", pays, destinataire)
+    logger.info("Alert summary sent for %s to %s", country, recipient)
     return True
