@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: futurekawa-api
+  namespace: futurekawa-app
+  labels:
+    app: futurekawa-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: futurekawa-api
+  template:
+    metadata:
+      labels:
+        app: futurekawa-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/plusdefritesalacantine/futurekawa-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            - name: API_PORT
+              value: "8001"
+            
+            - name: DATABASE_URL
+              value: "postgresql://futurekawa:futurekawa@postgres-service:5432/futurekawa"
+
+            - name: SMTP_HOST
+              value: "mailpit-service"
+            - name: SMTP_PORT
+              value: "1025"
+            - name: BRESIL_MANAGER_EMAIL
+              value: "responsable@futurekawa.local"
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: futurekawa-api-service
+  namespace: futurekawa-app
+spec:
+  type: ClusterIP
+  selector:
+    app: futurekawa-api
+  ports:
+    - protocol: TCP
+      port: 8001
+      targetPort: 8001
