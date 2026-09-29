@@ -1,11 +1,11 @@
-"""Mises à jour de schéma légères pour les bases déjà créées.
+"""Lightweight schema updates for already-created databases.
 
-`Base.metadata.create_all()` crée les tables manquantes mais ne touche jamais à
-une table existante : une base créée avant l'ajout de `mesures.lot_id` reste donc
-sans cette colonne et l'app plante au premier SELECT ("no such column: mesures.lot_id").
-Le projet n'utilise pas Alembic ; on comble ici l'écart en ajoutant les colonnes
-nullables absentes, ce qui suffit aux évolutions du modèle et fonctionne aussi
-bien sur SQLite que sur PostgreSQL.
+`Base.metadata.create_all()` creates the missing tables but never touches an
+existing table: a database created before `measures.batch_id` was added therefore
+stays without that column and the app crashes on the first SELECT ("no such
+column: measures.batch_id"). The project does not use Alembic; we close the gap
+here by adding the missing nullable columns, which is enough for the model
+evolutions and works just as well on SQLite as on PostgreSQL.
 """
 import logging
 
@@ -17,30 +17,30 @@ from app.models import Base
 logger = logging.getLogger(__name__)
 
 
-def synchroniser_schema(engine: Engine) -> None:
-    """Ajoute aux tables existantes les colonnes nullables présentes dans les modèles."""
-    inspecteur = inspect(engine)
-    tables_existantes = set(inspecteur.get_table_names())
+def sync_schema(engine: Engine) -> None:
+    """Adds to the existing tables the nullable columns present in the models."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
 
     for table in Base.metadata.sorted_tables:
-        if table.name not in tables_existantes:
+        if table.name not in existing_tables:
             continue
 
-        colonnes_en_base = {col["name"] for col in inspecteur.get_columns(table.name)}
-        for colonne in table.columns:
-            if colonne.name in colonnes_en_base:
+        columns_in_db = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in columns_in_db:
                 continue
-            if not colonne.nullable or colonne.primary_key:
+            if not column.nullable or column.primary_key:
                 logger.warning(
-                    "Colonne %s.%s absente et non nullable : migration manuelle requise.",
-                    table.name, colonne.name,
+                    "Column %s.%s is missing and not nullable: manual migration required.",
+                    table.name, column.name,
                 )
                 continue
 
-            type_sql = colonne.type.compile(engine.dialect)
-            ddl = f"ALTER TABLE {table.name} ADD COLUMN {colonne.name} {type_sql}"
-            for fk in colonne.foreign_keys:
+            type_sql = column.type.compile(engine.dialect)
+            ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {type_sql}"
+            for fk in column.foreign_keys:
                 ddl += f" REFERENCES {fk.column.table.name}({fk.column.name})"
-            with engine.begin() as connexion:
-                connexion.execute(text(ddl))
-            logger.info("Colonne %s.%s ajoutée.", table.name, colonne.name)
+            with engine.begin() as connection:
+                connection.execute(text(ddl))
+            logger.info("Column %s.%s added.", table.name, column.name)

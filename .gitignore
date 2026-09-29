@@ -5,13 +5,13 @@ __pycache__/
 *.pyd
 *.so
 
-# Environnements virtuels
+# Virtual environments
 .venv/
 venv/
 env/
 .python-version
 
-# Tests & qualité
+# Tests & quality
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -19,11 +19,11 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Variables d'environnement
+# Environment variables
 .env
 .env.local
 
-# Outils de packaging
+# Packaging tools
 dist/
 build/
 *.egg-info/
@@ -36,5 +36,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
-test.db
-seed.sql
+
+# SQLite databases
+*.db
+*.db.bak-*
