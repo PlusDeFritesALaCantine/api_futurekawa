@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/plusdefritesalacantine/futurekawa-api:latest
+          image: ghcr.io/plusdefritesalacantine/api_futurekawa:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8001
