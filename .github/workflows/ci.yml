@@ -143,10 +143,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver: kubernetes
-          driver-opts: |
-            namespace=arc-runners
 
       - name: Build and push image
         uses: docker/build-push-action@v6
