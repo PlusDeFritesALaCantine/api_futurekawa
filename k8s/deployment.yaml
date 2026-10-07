@@ -26,7 +26,7 @@ spec:
               value: "8001"
             
             - name: DATABASE_URL
-              value: "postgresql://futurekawa:futurekawa@postgres-service:5432/futurekawa"
+              value: "postgresql+psycopg2://futurekawa:futurekawa@postgres-service:5432/futurekawa"
 
             - name: SMTP_HOST
               value: "mailpit-service"
